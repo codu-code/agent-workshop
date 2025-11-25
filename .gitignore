@@ -50,3 +50,8 @@ yarn-error.log*
 # Personal notes
 TODO.md
 WORKING_TODO.md
+
+# Workshop development
+/tempfiles
+WORKSHOP_PLAN.md
+.claude*
