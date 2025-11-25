@@ -7,6 +7,7 @@ import {
   stepCountIs,
   streamText,
 } from "ai";
+import { createTutorAgent } from "@/lib/ai/agents";
 import { getWeather } from "@/lib/ai/tools/get-weather";
 import { unstable_cache as cache } from "next/cache";
 import type { ModelCatalog } from "tokenlens/core";
@@ -181,10 +182,11 @@ export async function POST(request: Request) {
           experimental_activeTools:
             selectedChatModel === "chat-model-reasoning"
               ? []
-              : ["getWeather"],
+              : ["getWeather", "tutor"],
           experimental_transform: smoothStream({ chunking: "word" }),
           tools: {
             getWeather,
+            tutor: createTutorAgent({ session, dataStream }),
           },
           experimental_telemetry: {
             isEnabled: isProductionEnvironment,
