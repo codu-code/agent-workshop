@@ -95,4 +95,10 @@ export const documentHandlersByArtifactKind: DocumentHandler[] = [
   sheetDocumentHandler,
 ];
 
-export const artifactKinds = ["text", "code", "sheet"] as const;
+export const artifactKinds = [
+  "text",
+  "code",
+  "sheet",
+  "flashcard",
+  "study-plan",
+] as const;
