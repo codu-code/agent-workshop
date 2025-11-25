@@ -4,8 +4,10 @@ import {
   createUIMessageStream,
   JsonToSseTransformStream,
   smoothStream,
+  stepCountIs,
   streamText,
 } from "ai";
+import { getWeather } from "@/lib/ai/tools/get-weather";
 import { unstable_cache as cache } from "next/cache";
 import type { ModelCatalog } from "tokenlens/core";
 
@@ -175,7 +177,15 @@ export async function POST(request: Request) {
           model: myProvider.languageModel(selectedChatModel),
           system: systemPrompt({ selectedChatModel, requestHints }),
           messages: convertToModelMessages(uiMessages),
+          stopWhen: stepCountIs(5),
+          experimental_activeTools:
+            selectedChatModel === "chat-model-reasoning"
+              ? []
+              : ["getWeather"],
           experimental_transform: smoothStream({ chunking: "word" }),
+          tools: {
+            getWeather,
+          },
           experimental_telemetry: {
             isEnabled: isProductionEnvironment,
             functionId: "stream-text",

@@ -1,7 +1,7 @@
-import type { UIMessage } from "ai";
+import type { InferUITool, UIMessage } from "ai";
 import { z } from "zod";
 import type { ArtifactKind } from "@/components/artifact";
-import type { WeatherAtLocation } from "@/components/weather";
+import type { getWeather } from "./ai/tools/get-weather";
 import type { Suggestion } from "./db/types";
 import type { AppUsage } from "./usage";
 
@@ -13,8 +13,10 @@ export const messageMetadataSchema = z.object({
 
 export type MessageMetadata = z.infer<typeof messageMetadataSchema>;
 
-// Tool type definitions for UI rendering
-// These are placeholders in Chapter 0 - tools not registered in the API
+// Tool types - inferred from actual tool definitions
+type weatherTool = InferUITool<typeof getWeather>;
+
+// Placeholder types for tools not yet implemented
 // UITools expects { input, output } shape for each tool
 type DocumentResult = {
   id: string;
@@ -23,10 +25,7 @@ type DocumentResult = {
 };
 
 export type ChatTools = {
-  getWeather: {
-    input: { latitude: number; longitude: number };
-    output: WeatherAtLocation;
-  };
+  getWeather: weatherTool;
   createDocument: {
     input: { title: string; kind: ArtifactKind };
     output: DocumentResult | { error: string };
