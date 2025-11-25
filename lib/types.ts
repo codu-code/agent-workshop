@@ -1,16 +1,7 @@
-import type { InferUITool, UIMessage } from "ai";
+import type { UIMessage } from "ai";
 import { z } from "zod";
 import type { ArtifactKind } from "@/components/artifact";
-import type {
-  createAnalystAgent,
-  createPlannerAgent,
-  createQuizMasterAgent,
-  createTutorAgent,
-} from "./ai/agents";
-import type { createDocument } from "./ai/tools/create-document";
-import type { getWeather } from "./ai/tools/get-weather";
-import type { requestSuggestions } from "./ai/tools/request-suggestions";
-import type { updateDocument } from "./ai/tools/update-document";
+import type { WeatherAtLocation } from "@/components/weather";
 import type { Suggestion } from "./db/types";
 import type { AppUsage } from "./usage";
 
@@ -22,30 +13,32 @@ export const messageMetadataSchema = z.object({
 
 export type MessageMetadata = z.infer<typeof messageMetadataSchema>;
 
-// Tool types
-type weatherTool = InferUITool<typeof getWeather>;
-type createDocumentTool = InferUITool<ReturnType<typeof createDocument>>;
-type updateDocumentTool = InferUITool<ReturnType<typeof updateDocument>>;
-type requestSuggestionsTool = InferUITool<
-  ReturnType<typeof requestSuggestions>
->;
-
-// Agent tool types
-type tutorTool = InferUITool<ReturnType<typeof createTutorAgent>>;
-type quizMasterTool = InferUITool<ReturnType<typeof createQuizMasterAgent>>;
-type plannerTool = InferUITool<ReturnType<typeof createPlannerAgent>>;
-type analystTool = InferUITool<ReturnType<typeof createAnalystAgent>>;
+// Tool type definitions for UI rendering
+// These are placeholders in Chapter 0 - tools not registered in the API
+// UITools expects { input, output } shape for each tool
+type DocumentResult = {
+  id: string;
+  title: string;
+  kind: ArtifactKind;
+};
 
 export type ChatTools = {
-  getWeather: weatherTool;
-  createDocument: createDocumentTool;
-  updateDocument: updateDocumentTool;
-  requestSuggestions: requestSuggestionsTool;
-  // Study buddy agents
-  tutor: tutorTool;
-  quizMaster: quizMasterTool;
-  planner: plannerTool;
-  analyst: analystTool;
+  getWeather: {
+    input: { latitude: number; longitude: number };
+    output: WeatherAtLocation;
+  };
+  createDocument: {
+    input: { title: string; kind: ArtifactKind };
+    output: DocumentResult | { error: string };
+  };
+  updateDocument: {
+    input: { id: string; description: string };
+    output: DocumentResult | { error: string };
+  };
+  requestSuggestions: {
+    input: { documentId: string };
+    output: DocumentResult | { error: string };
+  };
 };
 
 export type CustomUIDataTypes = {
@@ -53,8 +46,6 @@ export type CustomUIDataTypes = {
   imageDelta: string;
   sheetDelta: string;
   codeDelta: string;
-  flashcardDelta: string;
-  studyPlanDelta: string;
   suggestion: Suggestion;
   appendMessage: string;
   id: string;
@@ -62,7 +53,7 @@ export type CustomUIDataTypes = {
   kind: ArtifactKind;
   clear: null;
   finish: null;
-  error: string; // For error signaling from agents
+  error: string;
   usage: AppUsage;
 };
 

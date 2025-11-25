@@ -47,7 +47,7 @@ export type Document = {
   id: string;
   title: string;
   content?: string;
-  kind: "text" | "code" | "sheet" | "flashcard" | "study-plan";
+  kind: "text" | "code" | "sheet";
   userId: string;
   embedding?: number[];
   createdAt: Date;

@@ -13,9 +13,7 @@ import {
 import useSWR, { useSWRConfig } from "swr";
 import { useDebounceCallback, useWindowSize } from "usehooks-ts";
 import { codeArtifact } from "@/artifacts/code/client";
-import { flashcardArtifact } from "@/artifacts/flashcard/client";
 import { sheetArtifact } from "@/artifacts/sheet/client";
-import { studyPlanArtifact } from "@/artifacts/study-plan/client";
 import { textArtifact } from "@/artifacts/text/client";
 import { useArtifact } from "@/hooks/use-artifact";
 import type { Document, Vote } from "@/lib/db/types";
@@ -34,8 +32,6 @@ export const artifactDefinitions = [
   textArtifact,
   codeArtifact,
   sheetArtifact,
-  flashcardArtifact,
-  studyPlanArtifact,
 ];
 export type ArtifactKind = (typeof artifactDefinitions)[number]["kind"];
 
