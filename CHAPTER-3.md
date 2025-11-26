@@ -2,6 +2,55 @@
 
 In this chapter, we'll add multiple specialized agents and see how they work together. We'll create a Quiz Master that tests knowledge and a Planner that creates study schedules.
 
+> **Branch**: `workshop/chapter-03-multi-agent`
+> ```bash
+> git checkout workshop/chapter-03-multi-agent
+> ```
+
+---
+
+## Teaching Notes for Presenters
+
+### React Parallels
+
+| AI SDK Concept | React Equivalent | Key Insight |
+|----------------|------------------|-------------|
+| Multiple agents | Multiple context providers | Each provides specialized functionality |
+| Orchestrator routing | React Router | Picks the right component based on input |
+| `generateObject` | Form state with Zod | Returns typed, validated data structures |
+| Agent descriptions | Route matching patterns | AI matches intent to description, like URL patterns |
+
+### Key Talking Points
+
+1. **"The AI is your router"**
+   - Just like React Router matches URLs to components
+   - The orchestrator matches user intent to agents
+   - Good descriptions = accurate routing
+
+2. **"`generateObject` is like a smart form submission"**
+   - You define the schema (like form fields)
+   - AI fills it in with valid data
+   - Returns typed JSON, not free-form text
+
+3. **"Agents should be single-purpose"**
+   - One agent = one job (Single Responsibility)
+   - Overlapping descriptions = confused routing
+   - Clear triggers = predictable behavior
+
+### Live Demo Tips
+
+- Ask for a quiz, then a study plan, then an explanation - show all three agents
+- Try chained requests: "Explain React hooks, then quiz me on them"
+- Show the Zod schema and how it enforces structure
+
+### Common Questions
+
+- **"What if two agents could handle the request?"** - Most specific description wins
+- **"Can I have too many agents?"** - Yes! Each adds complexity. Start with 3-5
+- **"Why `generateObject` for quiz but `generateText` for tutor?"** - Quiz needs structured data; tutor needs free-form text
+
+---
+
 ## Learning Objectives
 
 By the end of this chapter, you'll understand:

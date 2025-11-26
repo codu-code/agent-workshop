@@ -2,6 +2,63 @@
 
 In this final chapter, we'll step back and review the complete Study Buddy architecture, understand how all pieces fit together, and explore ideas for extending the system.
 
+> **Branch**: `workshop/chapter-05-complete`
+> ```bash
+> git checkout workshop/chapter-05-complete
+> ```
+
+---
+
+## Teaching Notes for Presenters
+
+### Workshop Recap: React Parallels
+
+| Chapter | Key AI SDK Concept | React Parallel |
+|---------|-------------------|----------------|
+| 0 | `useChat` / `streamText` | `useState` + `useEffect` for async data |
+| 1 | Tools with Zod schemas | Custom hooks with typed props |
+| 2 | Tool-as-agent pattern | HOCs that fetch their own data |
+| 3 | Multi-agent orchestration | React Router for user intent |
+| 4 | Artifacts with persistence | Controlled components with form state |
+
+### Key Takeaways to Emphasize
+
+1. **"The AI SDK is React-friendly by design"**
+   - Same mental models: hooks, components, state
+   - Streaming = Suspense for AI responses
+   - Tools/agents = just functions with extra metadata
+
+2. **"Start simple, add complexity as needed"**
+   - Chapter 0 → 5 is a natural progression
+   - Don't start with 10 agents; start with 1
+   - Artifacts are optional until you need persistence
+
+3. **"The orchestrator is your routing layer"**
+   - Good descriptions = good routing
+   - Test with edge cases ("What's the weather in a fictional city?")
+   - The AI is smarter than you think at understanding intent
+
+### Final Demo Suggestions
+
+- Show a complete flow: learn → quiz → study plan → check progress
+- Demonstrate version history on artifacts
+- Show the database (Mongo Express) to prove persistence
+
+### Post-Workshop Resources
+
+- [AI SDK Documentation](https://sdk.vercel.ai/docs) - Official docs
+- [Vercel AI Templates](https://vercel.com/templates?type=ai) - More examples
+- [This workshop repo](https://github.com/your-repo) - Reference code
+
+### Common Post-Workshop Questions
+
+- **"Can I use this with OpenAI/GPT-4?"** - Yes! Just change the provider
+- **"How do I add authentication?"** - It's already built in (NextAuth)
+- **"What about rate limiting?"** - Already implemented (see `lib/ai/entitlements.ts`)
+- **"How do I deploy this?"** - Standard Vercel/Next.js deployment
+
+---
+
 ## Learning Objectives
 
 By the end of this chapter, you'll understand:

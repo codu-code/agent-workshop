@@ -2,6 +2,49 @@
 
 Welcome to the AI Chatbot Workshop! In this chapter, we'll explore the foundation of our application - a basic chat interface powered by Next.js and the AI SDK.
 
+> **Branch**: `workshop/chapter-00-starting-point`
+> ```bash
+> git checkout workshop/chapter-00-starting-point
+> ```
+
+---
+
+## Teaching Notes for Presenters
+
+### React Parallels
+
+| AI SDK Concept | React Equivalent | Key Insight |
+|----------------|------------------|-------------|
+| `useChat` hook | `useState` + `useEffect` | Manages message state + side effects in one hook |
+| `streamText` | Server Action with streaming | Similar to `generateStaticParams` but for runtime AI |
+| Message history | Component state array | Just like managing a list of items in React state |
+| Data streaming | React Suspense boundaries | Progressive loading, but for tokens instead of components |
+
+### Key Talking Points
+
+1. **"The AI SDK is just React patterns applied to AI"**
+   - `useChat` is essentially `useSWR` or `useQuery` specialized for chat
+   - Streaming is like Progressive Hydration but for text generation
+   - The chat API route is a standard Next.js Route Handler
+
+2. **"Tokens, not characters"**
+   - LLMs generate tokens (word pieces), not individual characters
+   - This is why text appears in chunks, not letter-by-letter
+   - Cost is measured in tokens (~4 chars/token for English)
+
+3. **"Messages are immutable"**
+   - Just like React state, we never mutate message arrays
+   - Each message gets a unique ID (like React keys)
+   - History grows by adding, never modifying
+
+### Common Questions
+
+- **"Why streaming?"** - UX feels faster (first token in ~200ms vs 5s for complete response)
+- **"What's the system prompt?"** - Like a component's defaultProps, but for AI behavior
+- **"Can I use a different AI?"** - Yes! Just change the provider in `lib/ai/providers.ts`
+
+---
+
 ## Learning Objectives
 
 By the end of this chapter, you'll understand:
@@ -41,6 +84,9 @@ The heart of the application is `/app/(chat)/api/chat/route.ts`. This is where m
 
 ### Basic Chat Flow
 
+<details>
+<summary>📄 <strong>Code: Basic Chat API Route</strong> (click to expand)</summary>
+
 ```typescript
 // app/(chat)/api/chat/route.ts (simplified)
 import { streamText } from "ai";
@@ -60,6 +106,8 @@ export async function POST(request: Request) {
   return result.toDataStreamResponse();
 }
 ```
+
+</details>
 
 ### Key Concepts
 
@@ -92,6 +140,9 @@ When you send a message:
 
 The frontend uses `useChat` from the AI SDK React package:
 
+<details>
+<summary>📄 <strong>Code: useChat Hook Usage</strong> (click to expand)</summary>
+
 ```typescript
 // Simplified usage in a chat component
 import { useChat } from "@ai-sdk/react";
@@ -114,6 +165,10 @@ export function Chat() {
   );
 }
 ```
+
+</details>
+
+> 💡 **React Parallel**: `useChat` is like combining `useState` for messages, `useReducer` for state transitions, and `useSWR` for the API call - all in one hook.
 
 The `useChat` hook handles:
 - Managing message history
@@ -139,6 +194,9 @@ type Message = {
 
 The system prompt shapes the AI's personality and behavior:
 
+<details>
+<summary>📄 <strong>Code: System Prompt</strong> (click to expand)</summary>
+
 ```typescript
 // lib/ai/prompts.ts
 export const systemPrompt = () => `
@@ -146,6 +204,10 @@ You are a helpful AI assistant. Be concise and helpful.
 Today's date is ${new Date().toLocaleDateString()}.
 `;
 ```
+
+</details>
+
+> 💡 **React Parallel**: Think of the system prompt as `defaultProps` or the initial context value - it sets the baseline behavior that all messages inherit.
 
 ## Exercise: Trace a Message
 

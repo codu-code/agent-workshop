@@ -2,6 +2,55 @@
 
 In this chapter, we'll give the AI the ability to **do things** beyond just responding with text. We'll add a weather tool that demonstrates how AI can call functions to retrieve real-time information.
 
+> **Branch**: `workshop/chapter-01-first-tool`
+> ```bash
+> git checkout workshop/chapter-01-first-tool
+> ```
+
+---
+
+## Teaching Notes for Presenters
+
+### React Parallels
+
+| AI SDK Concept | React Equivalent | Key Insight |
+|----------------|------------------|-------------|
+| `tool()` function | Custom hook definition | Encapsulates reusable logic with a defined interface |
+| `inputSchema` (Zod) | PropTypes / TypeScript props | Validates inputs before execution |
+| `execute` function | Event handler callback | Runs when the AI decides to use the tool |
+| Tool description | JSDoc / component documentation | Helps the AI "read" when to use it |
+
+### Key Talking Points
+
+1. **"Tools are just functions with extra metadata"**
+   - The AI reads the `description` to decide when to call
+   - Zod schemas ensure type-safe inputs (like TypeScript for AI)
+   - `execute` is async - can fetch APIs, query DBs, anything
+
+2. **"The AI decides, not you"**
+   - You define WHAT the tool does, the AI decides WHEN
+   - Good descriptions = accurate tool selection
+   - Bad descriptions = confused AI, wrong tool calls
+
+3. **"Tools don't break the chat"**
+   - Tool results flow back into the conversation
+   - The AI synthesizes results into natural language
+   - Users see a seamless experience
+
+### Live Demo Tips
+
+- Show the Network tab to see tool calls as separate events
+- Intentionally ask something the tool can't handle ("What's the weather on Mars?")
+- Compare with/without tools: same question, different capabilities
+
+### Common Questions
+
+- **"Why Zod?"** - Runtime validation + TypeScript types in one schema
+- **"Can tools call other tools?"** - Not directly, but the AI can chain multiple tool calls
+- **"What if the API fails?"** - Handle errors gracefully in `execute`, return user-friendly messages
+
+---
+
 ## Learning Objectives
 
 By the end of this chapter, you'll understand:
@@ -25,6 +74,9 @@ When you ask "What's the weather in London?", instead of guessing, the AI can **
 
 Every tool has three parts:
 
+<details>
+<summary>📄 <strong>Code: Tool Anatomy</strong> (click to expand)</summary>
+
 ```typescript
 import { tool } from "ai";
 import { z } from "zod";
@@ -46,11 +98,18 @@ const myTool = tool({
 });
 ```
 
+</details>
+
+> 💡 **React Parallel**: This is like defining a custom hook with TypeScript props - the schema is your prop types, the execute is your hook logic, and the description is your JSDoc comment.
+
 ## The Weather Tool
 
 Here's the complete weather tool implementation:
 
 ### File: `lib/ai/tools/get-weather.ts`
+
+<details>
+<summary>📄 <strong>Code: Complete Weather Tool</strong> (click to expand)</summary>
 
 ```typescript
 import { tool } from "ai";
@@ -80,11 +139,16 @@ export const getWeather = tool({
 });
 ```
 
+</details>
+
 ## Wiring Tools into the Chat Route
 
 Add the tool to your chat route:
 
 ### File: `app/(chat)/api/chat/route.ts`
+
+<details>
+<summary>📄 <strong>Code: Add Tool to Route</strong> (click to expand)</summary>
 
 ```typescript
 import { streamText } from "ai";
@@ -110,6 +174,10 @@ export async function POST(request: Request) {
   return result.toDataStreamResponse();
 }
 ```
+
+</details>
+
+> 💡 **Key Insight**: `maxSteps: 5` allows the AI to make multiple tool calls in sequence - like calling `getWeather` for two cities to compare them.
 
 ## How Tool Calling Works
 

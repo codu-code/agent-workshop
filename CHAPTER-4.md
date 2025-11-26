@@ -2,6 +2,56 @@
 
 In this chapter, we'll transform our quiz and study plan results into **interactive artifacts** - rich UI components that appear in a dedicated panel alongside the chat.
 
+> **Branch**: `workshop/chapter-04-custom-artifacts`
+> ```bash
+> git checkout workshop/chapter-04-custom-artifacts
+> ```
+
+---
+
+## Teaching Notes for Presenters
+
+### React Parallels
+
+| AI SDK Concept | React Equivalent | Key Insight |
+|----------------|------------------|-------------|
+| `Artifact` class | React component factory | Defines shape, behavior, and UI for a content type |
+| `onStreamPart` | `useEffect` with deps | Reacts to incoming data updates |
+| `setArtifact` | `setState` / `dispatch` | Updates global artifact state |
+| `onSaveContent` | Form `onSubmit` with debounce | Persists user interactions |
+| Data stream deltas | WebSocket messages | Real-time updates from server |
+
+### Key Talking Points
+
+1. **"Artifacts are React components for AI content"**
+   - They have state, props, and lifecycle (like React components)
+   - `content` prop = the JSON data from the agent
+   - `onStreamPart` = like `useEffect` for streaming data
+
+2. **"The data stream is your real-time channel"**
+   - Agent writes `data-flashcardDelta` → client receives and renders
+   - Like a WebSocket, but built into the AI SDK
+   - Each delta type maps to an artifact kind
+
+3. **"Persistence is built-in"**
+   - `onSaveContent` saves to database automatically
+   - Debouncing prevents excessive writes
+   - Refresh the page → your progress is still there
+
+### Live Demo Tips
+
+- Create a quiz, answer some questions, refresh → show progress persists
+- Create a study plan, check off tasks, refresh → show checkboxes persist
+- Open the artifact panel and close it → show it can be reopened from chat
+
+### Common Questions
+
+- **"Why not just use React state?"** - Artifacts persist across sessions and can be versioned
+- **"Can I have multiple artifacts open?"** - Currently one at a time, but versions are tracked
+- **"How does streaming work?"** - Server writes deltas, `DataStreamHandler` routes to the right artifact
+
+---
+
 ## Learning Objectives
 
 By the end of this chapter, you'll understand:

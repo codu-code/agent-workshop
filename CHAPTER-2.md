@@ -2,6 +2,55 @@
 
 In this chapter, we'll create our first **agent** - a specialized AI that can make its own decisions and generate rich responses. We'll build a Tutor agent that explains concepts with different teaching approaches.
 
+> **Branch**: `workshop/chapter-02-tutor-agent`
+> ```bash
+> git checkout workshop/chapter-02-tutor-agent
+> ```
+
+---
+
+## Teaching Notes for Presenters
+
+### React Parallels
+
+| AI SDK Concept | React Equivalent | Key Insight |
+|----------------|------------------|-------------|
+| Agent as tool | Higher-order component (HOC) | Wraps additional logic around a base component |
+| `generateText` | Async `fetch` in useEffect | Awaits a result, doesn't stream |
+| `CreateAgentProps` | React Context value | Passes session and dataStream to all agents |
+| `AgentResult` | Custom hook return type | Standardized shape for all agent outputs |
+
+### Key Talking Points
+
+1. **"Agents are tools that think"**
+   - Regular tools: fetch data, return it
+   - Agents: make their own AI call, generate content
+   - The orchestrator decides WHICH agent, the agent decides HOW to respond
+
+2. **"The tool-as-agent pattern"**
+   - Agents ARE tools (same interface)
+   - But they have a brain (call `generateText` internally)
+   - Think: React component that fetches its own data
+
+3. **"Why not just use the main model?"**
+   - Separation of concerns (each agent has focused expertise)
+   - Different prompts for different tasks
+   - Can use different models per agent (fast for routing, smart for generation)
+
+### Live Demo Tips
+
+- Ask for the same explanation with different approaches ("explain like I'm 5" vs "technical deep-dive")
+- Show the console logs to trace the agent flow
+- Demonstrate that the orchestrator still responds naturally after the agent
+
+### Common Questions
+
+- **"Can agents call other agents?"** - Not directly in this pattern, but the orchestrator can chain them
+- **"Why `generateText` not `streamText`?"** - Agents return complete results; streaming happens at orchestrator level
+- **"What's the session for?"** - Personalization, rate limiting, saving user progress
+
+---
+
 ## Learning Objectives
 
 By the end of this chapter, you'll understand:
@@ -52,6 +101,9 @@ First, let's define the structure for our agents:
 
 ### File: `lib/ai/agents/types.ts`
 
+<details>
+<summary>📄 <strong>Code: Agent Type Definitions</strong> (click to expand)</summary>
+
 ```typescript
 import type { Session } from "next-auth";
 import type { DataStreamWriter } from "ai";
@@ -70,6 +122,10 @@ export type AgentResult = {
   data?: Record<string, unknown>;
 };
 ```
+
+</details>
+
+> 💡 **React Parallel**: `CreateAgentProps` is like a Context value - it's the same data passed to every agent, just like how React Context provides the same value to all consumers.
 
 ## Model Configuration
 
