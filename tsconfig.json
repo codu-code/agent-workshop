@@ -31,5 +31,5 @@
     "next.config.js",
     ".next/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules", "tempfiles"]
+  "exclude": ["node_modules"]
 }

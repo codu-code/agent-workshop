@@ -151,8 +151,8 @@ function FlashcardViewer({
         <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950">
           <p className="font-medium text-blue-900 text-sm dark:text-blue-100">
             {selectedAnswer === currentQuestion.correctAnswer
-              ? "Correct!"
-              : `Incorrect. The correct answer is ${optionLabels[currentQuestion.correctAnswer]}.`}
+              ? "✓ Correct!"
+              : `✗ Incorrect. The correct answer is ${optionLabels[currentQuestion.correctAnswer]}.`}
           </p>
           <p className="mt-2 text-blue-800 text-sm dark:text-blue-200">
             {currentQuestion.explanation}

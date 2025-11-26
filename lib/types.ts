@@ -7,7 +7,10 @@ import type {
   createQuizMasterAgent,
   createTutorAgent,
 } from "./ai/agents";
+import type { createDocument } from "./ai/tools/create-document";
 import type { getWeather } from "./ai/tools/get-weather";
+import type { requestSuggestions } from "./ai/tools/request-suggestions";
+import type { updateDocument } from "./ai/tools/update-document";
 import type { Suggestion } from "./db/types";
 import type { AppUsage } from "./usage";
 
@@ -19,8 +22,13 @@ export const messageMetadataSchema = z.object({
 
 export type MessageMetadata = z.infer<typeof messageMetadataSchema>;
 
-// Tool types - inferred from actual tool definitions
+// Tool types
 type weatherTool = InferUITool<typeof getWeather>;
+type createDocumentTool = InferUITool<ReturnType<typeof createDocument>>;
+type updateDocumentTool = InferUITool<ReturnType<typeof updateDocument>>;
+type requestSuggestionsTool = InferUITool<
+  ReturnType<typeof requestSuggestions>
+>;
 
 // Agent tool types
 type tutorTool = InferUITool<ReturnType<typeof createTutorAgent>>;
@@ -28,33 +36,16 @@ type quizMasterTool = InferUITool<ReturnType<typeof createQuizMasterAgent>>;
 type plannerTool = InferUITool<ReturnType<typeof createPlannerAgent>>;
 type analystTool = InferUITool<ReturnType<typeof createAnalystAgent>>;
 
-// Placeholder types for tools not yet implemented
-// UITools expects { input, output } shape for each tool
-type DocumentResult = {
-  id: string;
-  title: string;
-  kind: ArtifactKind;
-};
-
 export type ChatTools = {
   getWeather: weatherTool;
+  createDocument: createDocumentTool;
+  updateDocument: updateDocumentTool;
+  requestSuggestions: requestSuggestionsTool;
   // Study buddy agents
   tutor: tutorTool;
   quizMaster: quizMasterTool;
   planner: plannerTool;
   analyst: analystTool;
-  createDocument: {
-    input: { title: string; kind: ArtifactKind };
-    output: DocumentResult | { error: string };
-  };
-  updateDocument: {
-    input: { id: string; description: string };
-    output: DocumentResult | { error: string };
-  };
-  requestSuggestions: {
-    input: { documentId: string };
-    output: DocumentResult | { error: string };
-  };
 };
 
 export type CustomUIDataTypes = {
@@ -71,7 +62,7 @@ export type CustomUIDataTypes = {
   kind: ArtifactKind;
   clear: null;
   finish: null;
-  error: string;
+  error: string; // For error signaling from agents
   usage: AppUsage;
 };
 

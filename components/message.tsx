@@ -244,7 +244,7 @@ const PurePreviewMessage = ({
                     {state === "input-available" && (
                       <ToolInput input={part.input} />
                     )}
-                    {state === "output-available" && part.output && (
+                    {state === "output-available" && (
                       <ToolOutput
                         errorText={undefined}
                         output={

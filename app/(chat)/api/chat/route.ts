@@ -7,13 +7,6 @@ import {
   stepCountIs,
   streamText,
 } from "ai";
-import {
-  createAnalystAgent,
-  createPlannerAgent,
-  createQuizMasterAgent,
-  createTutorAgent,
-} from "@/lib/ai/agents";
-import { getWeather } from "@/lib/ai/tools/get-weather";
 import { unstable_cache as cache } from "next/cache";
 import type { ModelCatalog } from "tokenlens/core";
 
@@ -29,10 +22,20 @@ import { fetchModels } from "tokenlens/fetch";
 import { getUsage } from "tokenlens/helpers";
 import { auth, type UserType } from "@/app/(auth)/auth";
 import type { VisibilityType } from "@/components/visibility-selector";
+import {
+  createAnalystAgent,
+  createPlannerAgent,
+  createQuizMasterAgent,
+  createTutorAgent,
+} from "@/lib/ai/agents";
 import { entitlementsByUserType } from "@/lib/ai/entitlements";
 import type { ChatModel } from "@/lib/ai/models";
 import { type RequestHints, systemPrompt } from "@/lib/ai/prompts";
 import { myProvider } from "@/lib/ai/providers";
+import { createDocument } from "@/lib/ai/tools/create-document";
+import { getWeather } from "@/lib/ai/tools/get-weather";
+import { requestSuggestions } from "@/lib/ai/tools/request-suggestions";
+import { updateDocument } from "@/lib/ai/tools/update-document";
 import { isProductionEnvironment } from "@/lib/constants";
 import {
   createStreamId,
@@ -189,6 +192,9 @@ export async function POST(request: Request) {
               ? []
               : [
                   "getWeather",
+                  "createDocument",
+                  "updateDocument",
+                  "requestSuggestions",
                   // Study buddy agents
                   "tutor",
                   "quizMaster",
@@ -198,6 +204,12 @@ export async function POST(request: Request) {
           experimental_transform: smoothStream({ chunking: "word" }),
           tools: {
             getWeather,
+            createDocument: createDocument({ session, dataStream }),
+            updateDocument: updateDocument({ session, dataStream }),
+            requestSuggestions: requestSuggestions({
+              session,
+              dataStream,
+            }),
             // Study buddy agents
             tutor: createTutorAgent({ session, dataStream }),
             quizMaster: createQuizMasterAgent({ session, dataStream }),
