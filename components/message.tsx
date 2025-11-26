@@ -6,6 +6,7 @@ import { memo, useState } from "react";
 import type { Vote } from "@/lib/db/types";
 import type { ChatMessage } from "@/lib/types";
 import { cn, sanitizeText } from "@/lib/utils";
+import type { ArtifactKind } from "./artifact";
 import { useDataStream } from "./data-stream-provider";
 import { DocumentToolResult } from "./document";
 import { DocumentPreview } from "./document-preview";
@@ -265,6 +266,53 @@ const PurePreviewMessage = ({
                   </ToolContent>
                 </Tool>
               );
+            }
+
+            // Custom agent tools that create artifacts
+            if (type === "tool-quizMaster") {
+              const { toolCallId, state, output } = part;
+
+              if (
+                state === "output-available" &&
+                output?.success &&
+                output?.data?.documentId
+              ) {
+                return (
+                  <DocumentPreview
+                    isReadonly={isReadonly}
+                    key={toolCallId}
+                    result={{
+                      id: output.data.documentId,
+                      title: `Quiz: ${output.data.topic}`,
+                      kind: "flashcard" as ArtifactKind,
+                    }}
+                  />
+                );
+              }
+              return null;
+            }
+
+            if (type === "tool-planner") {
+              const { toolCallId, state, output } = part;
+
+              if (
+                state === "output-available" &&
+                output?.success &&
+                output?.data?.documentId
+              ) {
+                return (
+                  <DocumentPreview
+                    isReadonly={isReadonly}
+                    key={toolCallId}
+                    result={{
+                      id: output.data.documentId,
+                      title: `Study Plan: ${output.data.topic}`,
+                      kind: "study-plan" as ArtifactKind,
+                    }}
+                  />
+                );
+              }
+              return null;
             }
 
             return null;
