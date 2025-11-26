@@ -7,9 +7,9 @@ import {
   stepCountIs,
   streamText,
 } from "ai";
-import { getWeather } from "@/lib/ai/tools/get-weather";
 import { unstable_cache as cache } from "next/cache";
 import type { ModelCatalog } from "tokenlens/core";
+import { getWeather } from "@/lib/ai/tools/get-weather";
 
 // Type definition for resumable stream context (feature currently disabled - requires Redis)
 type ResumableStreamContext = {
@@ -179,9 +179,7 @@ export async function POST(request: Request) {
           messages: convertToModelMessages(uiMessages),
           stopWhen: stepCountIs(5),
           experimental_activeTools:
-            selectedChatModel === "chat-model-reasoning"
-              ? []
-              : ["getWeather"],
+            selectedChatModel === "chat-model-reasoning" ? [] : ["getWeather"],
           experimental_transform: smoothStream({ chunking: "word" }),
           tools: {
             getWeather,
