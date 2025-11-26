@@ -41,18 +41,18 @@ By the end of this chapter, you'll understand:
 
 ## The Quiz Master Agent
 
-Creates interactive quizzes to test knowledge:
+Creates interactive flashcard quizzes that appear as artifacts:
 
 ### File: `lib/ai/agents/quiz-master.ts`
 
 ```typescript
 import { generateObject, tool } from "ai";
 import { z } from "zod";
+import { saveDocument } from "@/lib/db/queries";
 import { myProvider } from "../providers";
 import type { AgentResult, CreateAgentProps } from "./types";
 
-// Schema for quiz questions
-const quizSchema = z.object({
+const flashcardSchema = z.object({
   topic: z.string(),
   questions: z.array(
     z.object({
@@ -65,10 +65,10 @@ const quizSchema = z.object({
 });
 
 /**
- * Quiz Master Agent - Creates interactive quizzes
+ * Quiz Master Agent - Creates interactive flashcard quizzes
  *
- * Triggers: "quiz me", "test my knowledge", "practice questions"
- * Output: Structured quiz data (later: flashcard artifact)
+ * Triggers: "quiz me", "test my knowledge", "practice questions", "assessment"
+ * Output: Creates a flashcard artifact for interactive testing
  */
 export const createQuizMasterAgent = ({
   session,
@@ -76,9 +76,7 @@ export const createQuizMasterAgent = ({
 }: CreateAgentProps) =>
   tool({
     description:
-      "Create a quiz to test knowledge on a topic. " +
-      "Use when the user wants to be quizzed, test their knowledge, or practice. " +
-      "Triggers: quiz me, test me, practice questions, assessment, flashcards.",
+      "Create a quiz or practice questions to test knowledge on a topic. Use when the user wants to be quizzed, test their knowledge, or practice with questions. Triggers: quiz me, test me, practice questions, assessment, flashcards.",
     inputSchema: z.object({
       topic: z.string().describe("The topic to create quiz questions about"),
       numberOfQuestions: z
@@ -100,90 +98,130 @@ export const createQuizMasterAgent = ({
       topic,
       numberOfQuestions,
       difficulty,
+      focusAreas,
     }): Promise<AgentResult> => {
+      const documentId = crypto.randomUUID();
+      const title = `Quiz: ${topic}`;
+
+      console.log(`[QuizMaster] Starting quiz generation for "${topic}"`);
       console.log(
-        `[QuizMaster] Creating ${numberOfQuestions} ${difficulty} questions about "${topic}"`
+        `[QuizMaster] Parameters: ${numberOfQuestions} questions, ${difficulty} difficulty`
       );
 
+      // Notify UI that we're creating an artifact (opens the panel)
+      dataStream.write({ type: "data-id", data: documentId });
+      dataStream.write({ type: "data-title", data: title });
+      dataStream.write({ type: "data-kind", data: "flashcard" });
+      dataStream.write({ type: "data-clear", data: null });
+
       try {
+        const focusContext = focusAreas?.length
+          ? `\n\nFocus particularly on: ${focusAreas.join(", ")}`
+          : "";
+
+        console.log("[QuizMaster] Calling generateObject...");
+
         const { object } = await generateObject({
-          model: myProvider.languageModel("chat-model"),
-          schema: quizSchema,
+          model: myProvider.languageModel("artifact-model"),
+          schema: flashcardSchema,
           prompt: `Create a quiz with ${numberOfQuestions} multiple choice questions about: "${topic}"
-Difficulty level: ${difficulty}
+Difficulty level: ${difficulty}${focusContext}
 
 Each question should:
 - Test understanding, not just memorization
 - Have 4 options (A, B, C, D)
-- Have exactly one correct answer
+- Have a clear correct answer
 - Include a brief explanation of why the answer is correct
 
-For mixed difficulty, vary the questions from easy to hard.`,
+Return the quiz as structured JSON.`,
         });
 
+        const content = JSON.stringify(object, null, 2);
         console.log(
-          `[QuizMaster] Generated ${object.questions.length} questions`
+          `[QuizMaster] Generated ${object.questions.length} questions (${content.length} chars)`
         );
 
-        // Format as readable text for now
-        // In Chapter 4, we'll create a proper flashcard artifact
-        const quizText = object.questions
-          .map(
-            (q, i) => `
-**Question ${i + 1}**: ${q.question}
+        // Stream the content to the UI
+        dataStream.write({
+          type: "data-flashcardDelta",
+          data: content,
+          transient: true,
+        });
 
-A) ${q.options[0]}
-B) ${q.options[1]}
-C) ${q.options[2]}
-D) ${q.options[3]}
+        // Signal completion - CRITICAL: always send this
+        dataStream.write({ type: "data-finish", data: null });
+        console.log("[QuizMaster] Sent data-finish signal");
 
-<details>
-<summary>Show Answer</summary>
-
-**Correct: ${["A", "B", "C", "D"][q.correctAnswer]}**
-
-${q.explanation}
-</details>
-`
-          )
-          .join("\n---\n");
+        // Save to database if user is authenticated
+        if (session?.user?.id) {
+          await saveDocument({
+            id: documentId,
+            title,
+            content,
+            kind: "flashcard",
+            userId: session.user.id,
+          });
+          console.log(`[QuizMaster] Saved document ${documentId} to database`);
+        }
 
         return {
           agentName: "quiz-master",
           success: true,
-          summary: `# Quiz: ${topic}\n\n${quizText}`,
+          summary: `Created an interactive quiz about "${topic}" with ${object.questions.length} questions. The flashcard quiz is now displayed - click through to test your knowledge!`,
           data: {
+            documentId,
             topic,
-            questionCount: object.questions.length,
+            numberOfQuestions: object.questions.length,
             difficulty,
+            focusAreas,
           },
         };
       } catch (error) {
-        console.error(`[QuizMaster] Error:`, error);
+        console.error("[QuizMaster] Error generating quiz:", error);
+
+        // CRITICAL: Always send finish signal to unblock UI
+        dataStream.write({ type: "data-finish", data: null });
+        console.log("[QuizMaster] Sent data-finish signal after error");
+
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+
         return {
           agentName: "quiz-master",
           success: false,
-          summary: `I couldn't create a quiz about "${topic}". Please try again.`,
-          data: { error: String(error) },
+          summary: `Failed to generate quiz about "${topic}": ${errorMessage}. Please try again.`,
+          data: {
+            documentId,
+            topic,
+            error: errorMessage,
+          },
         };
       }
     },
   });
 ```
 
+**Key patterns for artifact-creating agents:**
+1. Generate a unique `documentId` upfront
+2. Send `data-id`, `data-title`, `data-kind`, and `data-clear` to open the artifact panel
+3. Use `generateObject` with a schema for structured output
+4. Stream the content with the appropriate delta type (e.g., `data-flashcardDelta`)
+5. **Always** send `data-finish` to unblock the UI (even on errors!)
+6. Save to database for persistence
+
 ## The Planner Agent
 
-Creates structured study plans:
+Creates interactive study plans with progress tracking that appear as artifacts:
 
 ### File: `lib/ai/agents/planner.ts`
 
 ```typescript
 import { generateObject, tool } from "ai";
 import { z } from "zod";
+import { saveDocument } from "@/lib/db/queries";
 import { myProvider } from "../providers";
 import type { AgentResult, CreateAgentProps } from "./types";
 
-// Schema for study plans
 const studyPlanSchema = z.object({
   topic: z.string(),
   duration: z.string(),
@@ -207,20 +245,15 @@ const studyPlanSchema = z.object({
 });
 
 /**
- * Planner Agent - Creates study plans and learning roadmaps
+ * Planner Agent - Creates interactive study plans with progress tracking
  *
- * Triggers: "study plan", "learning roadmap", "how should I learn"
- * Output: Structured study plan (later: study-plan artifact)
+ * Triggers: "create study plan", "learning roadmap", "how should I learn", "study schedule"
+ * Output: Creates a study-plan artifact for tracking learning progress
  */
-export const createPlannerAgent = ({
-  session,
-  dataStream,
-}: CreateAgentProps) =>
+export const createPlannerAgent = ({ session, dataStream }: CreateAgentProps) =>
   tool({
     description:
-      "Create a personalized study plan or learning roadmap for a topic. " +
-      "Use when the user wants to plan their learning, create a study schedule, or get a structured approach. " +
-      "Triggers: study plan, learning roadmap, how to learn, schedule, curriculum.",
+      "Create a personalized study plan or learning roadmap for a topic. Use when the user wants to plan their learning, create a study schedule, or get a structured approach to learning something. Triggers: study plan, learning roadmap, how to learn, schedule, curriculum.",
     inputSchema: z.object({
       topic: z
         .string()
@@ -228,7 +261,9 @@ export const createPlannerAgent = ({
       timeframe: z
         .string()
         .default("2 weeks")
-        .describe("How long the user has to learn (e.g., '1 week', '30 days')"),
+        .describe(
+          "How long the user has to learn (e.g., '1 week', '30 days', '3 months')"
+        ),
       hoursPerDay: z
         .number()
         .min(0.5)
@@ -239,27 +274,48 @@ export const createPlannerAgent = ({
         .enum(["complete beginner", "some basics", "intermediate", "advanced"])
         .default("complete beginner")
         .describe("User's current knowledge level"),
+      goals: z
+        .array(z.string())
+        .optional()
+        .describe("Specific goals or outcomes the user wants to achieve"),
     }),
     execute: async ({
       topic,
       timeframe,
       hoursPerDay,
       currentLevel,
+      goals,
     }): Promise<AgentResult> => {
+      const documentId = crypto.randomUUID();
+      const title = `Study Plan: ${topic}`;
+
+      console.log(`[Planner] Starting study plan generation for "${topic}"`);
       console.log(
-        `[Planner] Creating ${timeframe} study plan for "${topic}" (${hoursPerDay}h/day, ${currentLevel})`
+        `[Planner] Parameters: ${timeframe}, ${hoursPerDay}h/day, level: ${currentLevel}`
       );
 
+      // Notify UI that we're creating an artifact (opens the panel)
+      dataStream.write({ type: "data-id", data: documentId });
+      dataStream.write({ type: "data-title", data: title });
+      dataStream.write({ type: "data-kind", data: "study-plan" });
+      dataStream.write({ type: "data-clear", data: null });
+
       try {
+        const goalsContext = goals?.length
+          ? `\n\nSpecific goals to achieve:\n${goals.map((g) => `- ${g}`).join("\n")}`
+          : "";
+
+        console.log("[Planner] Calling generateObject...");
+
         const { object } = await generateObject({
-          model: myProvider.languageModel("chat-model"),
+          model: myProvider.languageModel("artifact-model"),
           schema: studyPlanSchema,
           prompt: `Create a structured study plan for learning "${topic}".
 
 Student profile:
 - Current level: ${currentLevel}
 - Available time: ${hoursPerDay} hours per day
-- Timeframe: ${timeframe}
+- Timeframe: ${timeframe}${goalsContext}
 
 Create a practical, actionable study plan that includes:
 - A clear overview of what will be learned
@@ -271,56 +327,67 @@ Create a practical, actionable study plan that includes:
 Make it realistic and achievable.`,
         });
 
+        const content = JSON.stringify(object, null, 2);
         console.log(
-          `[Planner] Generated plan with ${object.weeks.length} weeks`
+          `[Planner] Generated plan with ${object.weeks.length} weeks (${content.length} chars)`
         );
 
-        // Format as readable text
-        const planText = `
-# Study Plan: ${object.topic}
-**Duration**: ${object.duration}
+        // Stream the content to the UI
+        dataStream.write({
+          type: "data-studyPlanDelta",
+          data: content,
+          transient: true,
+        });
 
-## Overview
-${object.overview}
+        // Signal completion - CRITICAL: always send this
+        dataStream.write({ type: "data-finish", data: null });
+        console.log("[Planner] Sent data-finish signal");
 
-${object.weeks
-  .map(
-    (week) => `
-## Week ${week.week}: ${week.title}
-
-**Goals:**
-${week.goals.map((g) => `- ${g}`).join("\n")}
-
-**Tasks:**
-${week.tasks.map((t) => `- [ ] ${t.task} (${t.duration})`).join("\n")}
-
-**Resources:**
-${week.resources.map((r) => `- ${r}`).join("\n")}
-`
-  )
-  .join("\n")}
-
-## Tips for Success
-${object.tips.map((t) => `- ${t}`).join("\n")}
-`;
+        // Save to database if user is authenticated
+        if (session?.user?.id) {
+          await saveDocument({
+            id: documentId,
+            title,
+            content,
+            kind: "study-plan",
+            userId: session.user.id,
+          });
+          console.log(`[Planner] Saved document ${documentId} to database`);
+        }
 
         return {
           agentName: "planner",
           success: true,
-          summary: planText,
+          summary: `Created a ${timeframe} study plan for "${topic}" with ${object.weeks.length} weeks. The interactive study plan is now displayed - you can track your progress by checking off tasks as you complete them!`,
           data: {
+            documentId,
             topic,
             timeframe,
+            hoursPerDay,
+            currentLevel,
+            goals,
             weeksCount: object.weeks.length,
           },
         };
       } catch (error) {
-        console.error(`[Planner] Error:`, error);
+        console.error("[Planner] Error generating study plan:", error);
+
+        // CRITICAL: Always send finish signal to unblock UI
+        dataStream.write({ type: "data-finish", data: null });
+        console.log("[Planner] Sent data-finish signal after error");
+
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+
         return {
           agentName: "planner",
           success: false,
-          summary: `I couldn't create a study plan for "${topic}". Please try again.`,
-          data: { error: String(error) },
+          summary: `Failed to generate study plan for "${topic}": ${errorMessage}. Please try again.`,
+          data: {
+            documentId,
+            topic,
+            error: errorMessage,
+          },
         };
       }
     },
@@ -329,7 +396,7 @@ ${object.tips.map((t) => `- ${t}`).join("\n")}
 
 ## The Analyst Agent
 
-Analyzes content and extracts key insights:
+Analyzes content and extracts key insights (returns text, not an artifact):
 
 ### File: `lib/ai/agents/analyst.ts`
 
@@ -346,7 +413,16 @@ Your analysis approach:
 - Extract important facts, figures, and arguments
 - Note relationships between concepts
 - Highlight actionable insights
-- Provide clear, structured summaries`;
+- Provide clear, structured summaries
+
+For document analysis, provide:
+1. Executive summary (2-3 sentences)
+2. Key points and main arguments
+3. Important details and supporting evidence
+4. Connections to broader context
+5. Actionable takeaways or study notes
+
+Be thorough but concise. Focus on what would be most valuable for learning and retention.`;
 
 /**
  * Analyst Agent - Analyzes documents and extracts key insights
@@ -357,13 +433,9 @@ Your analysis approach:
 export const createAnalystAgent = (_props: CreateAgentProps) =>
   tool({
     description:
-      "Analyze content, extract key insights, and create summaries. " +
-      "Use when the user wants to understand, summarize, or extract key points. " +
-      "Triggers: analyze, summarize, key points, main ideas, extract insights.",
+      "Analyze content, extract key insights, and create summaries. Use when the user wants to understand, summarize, or extract key points from text, documents, or concepts. Triggers: analyze, summarize, key points, main ideas, extract insights, break down.",
     inputSchema: z.object({
-      content: z
-        .string()
-        .describe("The text or content to analyze"),
+      content: z.string().describe("The text or content to analyze"),
       analysisType: z
         .enum(["summary", "key-points", "deep-analysis", "study-notes"])
         .default("summary")
@@ -383,8 +455,6 @@ export const createAnalystAgent = (_props: CreateAgentProps) =>
       focusOn,
       outputLength,
     }): Promise<AgentResult> => {
-      console.log(`[Analyst] Analyzing content (${analysisType})`);
-
       const focusContext = focusOn
         ? `\n\nFocus particularly on: ${focusOn}`
         : "";
@@ -396,10 +466,14 @@ export const createAnalystAgent = (_props: CreateAgentProps) =>
       };
 
       const analysisGuide = {
-        summary: "Create a clear summary highlighting the main message.",
-        "key-points": "Extract and list the most important points as bullet points.",
-        "deep-analysis": "Provide thorough analysis including themes and implications.",
-        "study-notes": "Create study-friendly notes with headings and key terms.",
+        summary:
+          "Create a clear summary highlighting the main message and supporting points.",
+        "key-points":
+          "Extract and list the most important points as bullet points with brief explanations.",
+        "deep-analysis":
+          "Provide thorough analysis including themes, arguments, evidence, and implications.",
+        "study-notes":
+          "Create study-friendly notes with headings, key terms, and memorable takeaways.",
       };
 
       const prompt = `Analyze the following content:
@@ -414,59 +488,73 @@ ${focusContext}
 
 ${lengthGuide[outputLength]}`;
 
-      try {
-        const { text } = await generateText({
-          model: myProvider.languageModel("chat-model"),
-          system: ANALYST_SYSTEM_PROMPT,
-          prompt,
-        });
+      const { text } = await generateText({
+        model: myProvider.languageModel("chat-model"),
+        system: ANALYST_SYSTEM_PROMPT,
+        prompt,
+      });
 
-        return {
-          agentName: "analyst",
-          success: true,
-          summary: text,
-          data: { analysisType, focusOn, outputLength },
-        };
-      } catch (error) {
-        console.error(`[Analyst] Error:`, error);
-        return {
-          agentName: "analyst",
-          success: false,
-          summary: "I couldn't analyze the content. Please try again.",
-          data: { error: String(error) },
-        };
-      }
+      return {
+        agentName: "analyst",
+        success: true,
+        summary: text,
+        data: {
+          analysisType,
+          focusOn,
+          outputLength,
+          contentLength: content.length,
+        },
+      };
     },
   });
 ```
 
 **Key difference from Tutor**: The Analyst focuses on breaking down existing content, while the Tutor generates new explanations. Use Analyst for "summarize this article" and Tutor for "explain quantum physics".
 
+**Key difference from Quiz/Planner**: The Analyst returns text directly in the `summary` field (like the Tutor), while Quiz Master and Planner create artifacts with `dataStream.write()` calls.
+
 ## Wiring All Agents Together
 
 ### File: `app/(chat)/api/chat/route.ts`
 
+The route handler uses `createUIMessageStream` and barrel imports from `@/lib/ai/agents`:
+
 ```typescript
-import { createDataStreamResponse, streamText } from "ai";
-import { myProvider } from "@/lib/ai/providers";
-import { systemPrompt } from "@/lib/ai/prompts";
-import { getWeather } from "@/lib/ai/tools/get-weather";
-import { createTutorAgent } from "@/lib/ai/agents/tutor";
-import { createQuizMasterAgent } from "@/lib/ai/agents/quiz-master";
-import { createPlannerAgent } from "@/lib/ai/agents/planner";
-import { createAnalystAgent } from "@/lib/ai/agents/analyst";
+import {
+  convertToModelMessages,
+  createUIMessageStream,
+  JsonToSseTransformStream,
+  smoothStream,
+  stepCountIs,
+  streamText,
+} from "ai";
 import { auth } from "@/app/(auth)/auth";
+import {
+  createAnalystAgent,
+  createPlannerAgent,
+  createQuizMasterAgent,
+  createTutorAgent,
+} from "@/lib/ai/agents";
+import { type RequestHints, systemPrompt } from "@/lib/ai/prompts";
+import { myProvider } from "@/lib/ai/providers";
+import { getWeather } from "@/lib/ai/tools/get-weather";
 
 export async function POST(request: Request) {
   const session = await auth();
-  const { messages } = await request.json();
+  // ... request parsing, validation, etc.
 
-  return createDataStreamResponse({
-    execute: (dataStream) => {
+  const stream = createUIMessageStream({
+    execute: ({ writer: dataStream }) => {
       const result = streamText({
-        model: myProvider.languageModel("chat-model"),
-        system: systemPrompt(),
-        messages,
+        model: myProvider.languageModel(selectedChatModel),
+        system: systemPrompt({ selectedChatModel, requestHints }),
+        messages: convertToModelMessages(uiMessages),
+        stopWhen: stepCountIs(5),
+        experimental_activeTools:
+          selectedChatModel === "chat-model-reasoning"
+            ? []
+            : ["getWeather", "tutor", "quizMaster", "planner", "analyst"],
+        experimental_transform: smoothStream({ chunking: "word" }),
         tools: {
           getWeather,
           tutor: createTutorAgent({ session, dataStream }),
@@ -474,59 +562,95 @@ export async function POST(request: Request) {
           planner: createPlannerAgent({ session, dataStream }),
           analyst: createAnalystAgent({ session, dataStream }),
         },
-        maxSteps: 5,
       });
 
-      result.mergeIntoDataStream(dataStream);
+      result.consumeStream();
+
+      dataStream.merge(
+        result.toUIMessageStream({
+          sendReasoning: true,
+        })
+      );
     },
+    // ... onFinish, onError handlers
   });
+
+  return new Response(stream.pipeThrough(new JsonToSseTransformStream()));
 }
 ```
+
+**Key points:**
+- Use barrel import `from "@/lib/ai/agents"` (not individual files)
+- `createUIMessageStream` + `JsonToSseTransformStream` for streaming
+- `stepCountIs(5)` limits agent call depth
+- `experimental_activeTools` disables tools for reasoning model
 
 ## Updated System Prompt
 
 ### File: `lib/ai/prompts.ts`
 
+The system prompt is built from multiple parts and takes parameters:
+
 ```typescript
-export const systemPrompt = () => `
-You are Study Buddy, an AI assistant that helps users learn effectively.
+export const regularPrompt =
+  "You are a friendly study buddy assistant! Keep your responses concise and helpful.";
 
-## Your Specialized Agents
+export const agentRoutingPrompt = `
+You are a Study Buddy with specialized agents available as tools. Choose the right agent based on what the user needs:
 
-### tutor
-Use for explanations and teaching.
-- "explain [topic]"
-- "teach me about [topic]"
-- "how does [thing] work"
+**tutor** - Explain concepts with examples and analogies
+Use for: "explain", "teach me", "how does X work", "what is X", understanding concepts
 
-### quizMaster
-Use for testing knowledge.
-- "quiz me on [topic]"
-- "test my knowledge"
-- "practice questions"
+**quizMaster** - Create quizzes and practice questions (creates interactive flashcard artifact)
+Use for: "quiz me", "test my knowledge", "practice questions", "assessment"
 
-### planner
-Use for creating study plans.
-- "create a study plan for [topic]"
-- "learning roadmap"
-- "how should I learn [topic]"
+**planner** - Create study plans and learning roadmaps (creates interactive study-plan artifact)
+Use for: "study plan", "learning roadmap", "how should I learn", "schedule"
 
-### analyst
-Use for analyzing and summarizing content.
-- "summarize this"
-- "key points from [content]"
-- "analyze this article"
+**analyst** - Analyze content and extract key insights
+Use for: "summarize", "key points", "analyze this", "what's important"
 
-## Guidelines
+IMPORTANT ROUTING RULES:
+1. Match user intent to the most appropriate agent
+2. If the request doesn't clearly match an agent, respond conversationally
+3. After using an agent, suggest related follow-ups (e.g., after explaining, offer to quiz)
+4. You can chain agents - explain first, then offer to create a study plan
 
-1. **Route appropriately**: Match user intent to the right agent
-2. **Suggest next steps**: After explaining, offer a quiz. After a quiz, suggest a study plan
-3. **Be encouraging**: Celebrate learning progress
-4. **Stay focused**: Keep responses relevant to learning
-
-Today's date is ${new Date().toLocaleDateString()}.
+CRITICAL: Agents (quizMaster, planner) create their own artifacts automatically. After using these agents:
+- Do NOT call createDocument - the artifact is already created
+- Do NOT try to display or reformat the agent's output
+- Simply acknowledge the artifact was created and offer follow-up suggestions
 `;
+
+export type RequestHints = {
+  latitude: Geo["latitude"];
+  longitude: Geo["longitude"];
+  city: Geo["city"];
+  country: Geo["country"];
+};
+
+export const systemPrompt = ({
+  selectedChatModel,
+  requestHints,
+}: {
+  selectedChatModel: string;
+  requestHints: RequestHints;
+}) => {
+  const requestPrompt = getRequestPromptFromHints(requestHints);
+
+  if (selectedChatModel === "chat-model-reasoning") {
+    return `${regularPrompt}\n\n${requestPrompt}`;
+  }
+
+  return `${regularPrompt}\n\n${agentRoutingPrompt}\n\n${requestPrompt}`;
+};
 ```
+
+**Key points:**
+- `regularPrompt` for base personality
+- `agentRoutingPrompt` for tool/agent descriptions (only for non-reasoning models)
+- `requestHints` adds geolocation context
+- Reasoning model gets simpler prompt (no tools)
 
 ## Agent Collaboration in Action
 
@@ -622,7 +746,8 @@ Create a new agent that helps review previously created flashcards:
 | Agent Routing | Based on tool descriptions and user intent |
 | generateObject | AI SDK function that returns typed data |
 | Zod Schema | Defines the structure of generated data |
-| Multi-step | maxSteps allows agents to be called in sequence |
+| stepCountIs | Limits how many agent steps can run in sequence |
+| dataStream.write | Sends artifact data to UI in real-time |
 
 ## What's Next
 
