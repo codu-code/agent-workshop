@@ -48,7 +48,7 @@ const myTool = tool({
 
 ## The Weather Tool
 
-Here's the complete weather tool implementation:
+Here's the complete weather tool implementation with city name geocoding:
 
 ### File: `lib/ai/tools/get-weather.ts`
 
@@ -56,29 +56,93 @@ Here's the complete weather tool implementation:
 import { tool } from "ai";
 import { z } from "zod";
 
+// Helper function to convert city names to coordinates
+async function geocodeCity(
+  city: string
+): Promise<{ latitude: number; longitude: number } | null> {
+  try {
+    const response = await fetch(
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`
+    );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+
+    if (!data.results || data.results.length === 0) {
+      return null;
+    }
+
+    const result = data.results[0];
+    return {
+      latitude: result.latitude,
+      longitude: result.longitude,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export const getWeather = tool({
   description:
-    "Get the current weather at a location. Use this when users ask about weather.",
+    "Get the current weather at a location. You can provide either coordinates or a city name.",
   inputSchema: z.object({
-    latitude: z.number().describe("Latitude coordinate"),
-    longitude: z.number().describe("Longitude coordinate"),
+    latitude: z.number().optional(),
+    longitude: z.number().optional(),
+    city: z
+      .string()
+      .describe("City name (e.g., 'San Francisco', 'New York', 'London')")
+      .optional(),
   }),
-  execute: async ({ latitude, longitude }) => {
-    // In production, you'd call a real weather API
-    // For demo, we return mock data based on coordinates
+  execute: async (input) => {
+    let latitude: number;
+    let longitude: number;
+
+    // If city name provided, geocode it to coordinates
+    if (input.city) {
+      const coords = await geocodeCity(input.city);
+      if (!coords) {
+        return {
+          error: `Could not find coordinates for "${input.city}". Please check the city name.`,
+        };
+      }
+      latitude = coords.latitude;
+      longitude = coords.longitude;
+    } else if (input.latitude !== undefined && input.longitude !== undefined) {
+      latitude = input.latitude;
+      longitude = input.longitude;
+    } else {
+      return {
+        error:
+          "Please provide either a city name or both latitude and longitude coordinates.",
+      };
+    }
+
+    // Fetch weather data from Open-Meteo API
     const response = await fetch(
       `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m&hourly=temperature_2m&daily=sunrise,sunset&timezone=auto`
     );
 
-    const data = await response.json();
+    const weatherData = await response.json();
 
-    return {
-      temperature: data.current.temperature_2m,
-      unit: data.current_units.temperature_2m,
-    };
+    // Include city name in response if provided
+    if ("city" in input) {
+      weatherData.cityName = input.city;
+    }
+
+    return weatherData;
   },
 });
 ```
+
+### Key Features
+
+1. **Geocoding**: The `geocodeCity` helper converts city names to coordinates using the free Open-Meteo Geocoding API
+2. **Flexible Input**: Accepts either a city name OR latitude/longitude coordinates
+3. **Error Handling**: Returns helpful error messages if geocoding fails
+4. **Real Data**: Uses the Open-Meteo Weather API for actual weather data
 
 ## Wiring Tools into the Chat Route
 
@@ -87,29 +151,38 @@ Add the tool to your chat route:
 ### File: `app/(chat)/api/chat/route.ts`
 
 ```typescript
-import { streamText } from "ai";
+import { stepCountIs, streamText } from "ai";
 import { myProvider } from "@/lib/ai/providers";
 import { systemPrompt } from "@/lib/ai/prompts";
 import { getWeather } from "@/lib/ai/tools/get-weather";
 
 export async function POST(request: Request) {
-  const { messages } = await request.json();
+  const { messages, selectedChatModel } = await request.json();
 
   const result = streamText({
-    model: myProvider.languageModel("chat-model"),
-    system: systemPrompt(),
+    model: myProvider.languageModel(selectedChatModel),
+    system: systemPrompt({ selectedChatModel }),
     messages,
+    // Stop after 5 tool call steps
+    stopWhen: stepCountIs(5),
+    // Disable tools for reasoning models
+    experimental_activeTools:
+      selectedChatModel === "chat-model-reasoning" ? [] : ["getWeather"],
     // Add tools here!
     tools: {
       getWeather,
     },
-    // Let the AI call multiple tools if needed
-    maxSteps: 5,
   });
 
   return result.toDataStreamResponse();
 }
 ```
+
+### Key Configuration
+
+- **`stopWhen: stepCountIs(5)`**: Limits tool call chains to 5 steps
+- **`experimental_activeTools`**: Conditionally enables/disables tools (disabled for reasoning model)
+- **`tools`**: Object containing all available tools
 
 ## How Tool Calling Works
 
@@ -120,9 +193,12 @@ export async function POST(request: Request) {
 │ AI thinks: "I should use the getWeather tool"           │
 │                           ↓                             │
 │ AI generates tool call:                                 │
-│   { name: "getWeather", args: { lat: 48.8, lon: 2.3 }}  │
+│   { name: "getWeather", args: { city: "Paris" }}        │
 │                           ↓                             │
-│ Tool executes and returns: { temperature: 18, unit: "°C"}│
+│ Tool executes:                                          │
+│   1. geocodeCity("Paris") → { lat: 48.8, lon: 2.3 }     │
+│   2. fetch weather data from Open-Meteo API             │
+│   3. returns: { temperature: 18, cityName: "Paris" }    │
 │                           ↓                             │
 │ AI receives result and generates response:              │
 │   "The current temperature in Paris is 18°C"            │
@@ -139,19 +215,26 @@ Tool calls and results appear as special message parts. Here's how to render the
 "use client";
 
 type WeatherProps = {
-  temperature: number;
-  unit: string;
+  current: {
+    temperature_2m: number;
+  };
+  current_units: {
+    temperature_2m: string;
+  };
+  cityName?: string;
 };
 
-export function Weather({ temperature, unit }: WeatherProps) {
+export function Weather({ current, current_units, cityName }: WeatherProps) {
   return (
     <div className="flex items-center gap-2 rounded-lg border p-4">
       <span className="text-2xl">🌡️</span>
       <div>
-        <p className="font-semibold">Current Temperature</p>
+        <p className="font-semibold">
+          {cityName ? `Weather in ${cityName}` : "Current Weather"}
+        </p>
         <p className="text-3xl">
-          {temperature}
-          {unit}
+          {current.temperature_2m}
+          {current_units.temperature_2m}
         </p>
       </div>
     </div>
@@ -214,7 +297,8 @@ Should I bring an umbrella to Seattle?
 
 **Troubleshooting:**
 - If you see "I don't have access to real-time weather", check that the tool is properly added to the `tools` object in your chat route
-- If coordinates seem wrong, the AI is inferring lat/long from city names - this is expected behavior
+- If the city isn't found, try using a more common spelling or a larger nearby city
+- Check the browser console for any API errors
 
 ---
 
