@@ -146,43 +146,40 @@ export const getWeather = tool({
 
 ## Wiring Tools into the Chat Route
 
-Add the tool to your chat route:
+Add the tool to your chat route. The route already has streaming set up - you just need to add the tool:
 
 ### File: `app/(chat)/api/chat/route.ts`
 
 ```typescript
-import { stepCountIs, streamText } from "ai";
-import { myProvider } from "@/lib/ai/providers";
-import { systemPrompt } from "@/lib/ai/prompts";
+// Add this import at the top
 import { getWeather } from "@/lib/ai/tools/get-weather";
 
-export async function POST(request: Request) {
-  const { messages, selectedChatModel } = await request.json();
-
-  const result = streamText({
-    model: myProvider.languageModel(selectedChatModel),
-    system: systemPrompt({ selectedChatModel }),
-    messages,
-    // Stop after 5 tool call steps
-    stopWhen: stepCountIs(5),
-    // Disable tools for reasoning models
-    experimental_activeTools:
-      selectedChatModel === "chat-model-reasoning" ? [] : ["getWeather"],
-    // Add tools here!
-    tools: {
-      getWeather,
-    },
-  });
-
-  return result.toDataStreamResponse();
-}
+// Inside the POST handler, the streamText call should include:
+const result = streamText({
+  model: myProvider.languageModel(selectedChatModel),
+  system: systemPrompt({ selectedChatModel, requestHints }),
+  messages: convertToModelMessages(uiMessages),
+  // Stop after 5 tool call steps
+  stopWhen: stepCountIs(5),
+  // Disable tools for reasoning models
+  experimental_activeTools:
+    selectedChatModel === "chat-model-reasoning" ? [] : ["getWeather"],
+  experimental_transform: smoothStream({ chunking: "word" }),
+  // Add tools here!
+  tools: {
+    getWeather,
+  },
+});
 ```
+
+The full route handler uses `createUIMessageStream` with `JsonToSseTransformStream` for streaming - the key thing is adding `getWeather` to the `tools` object and `"getWeather"` to `experimental_activeTools`.
 
 ### Key Configuration
 
 - **`stopWhen: stepCountIs(5)`**: Limits tool call chains to 5 steps
 - **`experimental_activeTools`**: Conditionally enables/disables tools (disabled for reasoning model)
 - **`tools`**: Object containing all available tools
+- **`requestHints`**: Contains user's location (useful for "What's the weather?" without a city)
 
 ## How Tool Calling Works
 
@@ -254,22 +251,38 @@ export function Weather({ current, current_units, cityName }: WeatherProps) {
 })}
 ```
 
-## Updating the System Prompt
+## Updating the System Prompt (Optional)
 
-Help the AI know when to use tools:
+The AI will use tools based on their `description` field, so you don't *need* to update the system prompt. However, you can optionally add tool documentation to help the AI understand when to use tools.
+
+The system prompt is built from multiple parts. The simplest way to add tool info is to update the `regularPrompt` constant:
 
 ```typescript
 // lib/ai/prompts.ts
-export const systemPrompt = () => `
-You are a helpful AI assistant.
+
+// Update this constant to include tool documentation
+export const regularPrompt = `You are a friendly study buddy assistant! Keep your responses concise and helpful.
 
 ## Tools Available
 - **getWeather**: Use this when users ask about weather conditions.
-  Ask for a city name if not provided.
-
-Today's date is ${new Date().toLocaleDateString()}.
+  You can provide a city name like "Paris" or "Tokyo".
 `;
+
+// The systemPrompt function combines regularPrompt with location hints
+// No need to change this function - it already works!
+export const systemPrompt = ({
+  selectedChatModel,
+  requestHints,
+}: {
+  selectedChatModel: string;
+  requestHints: RequestHints;
+}) => {
+  const requestPrompt = getRequestPromptFromHints(requestHints);
+  return `${regularPrompt}\n\n${requestPrompt}`;
+};
 ```
+
+**Note**: The `requestHints` add the user's location context (city, country, lat/lon), which is useful for the weather tool - the AI can use the user's location as a default if they just say "What's the weather?"
 
 ## Try It Out: Weather Tool
 
