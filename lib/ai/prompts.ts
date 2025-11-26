@@ -20,7 +20,7 @@ About the origin of user's request:
 `;
 
 export const systemPrompt = ({
-  selectedChatModel,
+  selectedChatModel: _selectedChatModel,
   requestHints,
 }: {
   selectedChatModel: string;
