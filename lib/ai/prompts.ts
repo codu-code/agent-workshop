@@ -4,6 +4,18 @@ import type { ArtifactKind } from "@/components/artifact";
 export const regularPrompt =
   "You are a friendly study buddy assistant! Keep your responses concise and helpful.";
 
+export const agentRoutingPrompt = `
+You are a Study Buddy with specialized agents available as tools. Choose the right agent based on what the user needs:
+
+**tutor** - Explain concepts with examples and analogies
+Use for: "explain", "teach me", "how does X work", "what is X", understanding concepts
+
+IMPORTANT ROUTING RULES:
+1. Match user intent to the most appropriate agent
+2. If the request doesn't clearly match an agent, respond conversationally
+3. After using an agent, suggest related follow-ups (e.g., after explaining, offer to quiz)
+`;
+
 export type RequestHints = {
   latitude: Geo["latitude"];
   longitude: Geo["longitude"];
@@ -28,7 +40,11 @@ export const systemPrompt = ({
 }) => {
   const requestPrompt = getRequestPromptFromHints(requestHints);
 
-  return `${regularPrompt}\n\n${requestPrompt}`;
+  if (selectedChatModel === "chat-model-reasoning") {
+    return `${regularPrompt}\n\n${requestPrompt}`;
+  }
+
+  return `${regularPrompt}\n\n${agentRoutingPrompt}\n\n${requestPrompt}`;
 };
 
 export const codePrompt = `
