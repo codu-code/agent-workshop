@@ -7,6 +7,8 @@ import {
   stepCountIs,
   streamText,
 } from "ai";
+import { unstable_cache as cache } from "next/cache";
+import type { ModelCatalog } from "tokenlens/core";
 import {
   createAnalystAgent,
   createPlannerAgent,
@@ -14,8 +16,6 @@ import {
   createTutorAgent,
 } from "@/lib/ai/agents";
 import { getWeather } from "@/lib/ai/tools/get-weather";
-import { unstable_cache as cache } from "next/cache";
-import type { ModelCatalog } from "tokenlens/core";
 
 // Type definition for resumable stream context (feature currently disabled - requires Redis)
 type ResumableStreamContext = {
