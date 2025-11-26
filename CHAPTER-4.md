@@ -131,23 +131,32 @@ Add the new delta types to your custom types:
 
 ```typescript
 export type CustomUIDataTypes = {
-  // Existing types...
+  // Content delta types for streaming
   textDelta: string;
-  codeDelta: string;
+  imageDelta: string;
   sheetDelta: string;
+  codeDelta: string;
+  flashcardDelta: string;   // JSON string of FlashcardData
+  studyPlanDelta: string;   // JSON string of StudyPlanData
 
-  // New artifact types
-  flashcardDelta: string;  // JSON string of FlashcardData
-  studyPlanDelta: string;  // JSON string of StudyPlanData
+  // Other data types
+  suggestion: Suggestion;
+  appendMessage: string;
 
-  // Metadata
+  // Artifact metadata
   id: string;
   title: string;
-  kind: string;
+  kind: ArtifactKind;
+
+  // Control signals
   clear: null;
   finish: null;
+  error: string;            // For error signaling from agents
+  usage: AppUsage;          // Token usage tracking
 };
 ```
+
+Note: The actual `lib/types.ts` has additional type imports and tool type definitions. This shows the key `CustomUIDataTypes` structure.
 
 ## The Flashcard Artifact
 
@@ -392,22 +401,34 @@ export const createQuizMasterAgent = ({
 }: CreateAgentProps) =>
   tool({
     description:
-      "Create a quiz to test knowledge on a topic. " +
-      "Triggers: quiz me, test me, practice questions, flashcards.",
+      "Create a quiz or practice questions to test knowledge on a topic. Use when the user wants to be quizzed, test their knowledge, or practice with questions. Triggers: quiz me, test me, practice questions, assessment, flashcards.",
     inputSchema: z.object({
-      topic: z.string().describe("The topic to quiz on"),
-      numberOfQuestions: z.number().min(1).max(10).default(5),
-      difficulty: z.enum(["easy", "medium", "hard", "mixed"]).default("medium"),
+      topic: z.string().describe("The topic to create quiz questions about"),
+      numberOfQuestions: z
+        .number()
+        .min(1)
+        .max(10)
+        .default(5)
+        .describe("Number of questions to generate"),
+      difficulty: z
+        .enum(["easy", "medium", "hard", "mixed"])
+        .default("medium")
+        .describe("Difficulty level of the questions"),
+      focusAreas: z
+        .array(z.string())
+        .optional()
+        .describe("Specific areas within the topic to focus on"),
     }),
     execute: async ({
       topic,
       numberOfQuestions,
       difficulty,
+      focusAreas,
     }): Promise<AgentResult> => {
       const documentId = crypto.randomUUID();
       const title = `Quiz: ${topic}`;
 
-      console.log(`[QuizMaster] Creating quiz for "${topic}"`);
+      console.log(`[QuizMaster] Starting quiz generation for "${topic}"`);
 
       // Signal artifact creation (opens the panel)
       dataStream.write({ type: "data-id", data: documentId });
@@ -416,10 +437,23 @@ export const createQuizMasterAgent = ({
       dataStream.write({ type: "data-clear", data: null });
 
       try {
+        const focusContext = focusAreas?.length
+          ? `\n\nFocus particularly on: ${focusAreas.join(", ")}`
+          : "";
+
         const { object } = await generateObject({
-          model: myProvider.languageModel("chat-model"),
+          model: myProvider.languageModel("artifact-model"),
           schema: flashcardSchema,
-          prompt: `Create ${numberOfQuestions} ${difficulty} quiz questions about "${topic}".`,
+          prompt: `Create a quiz with ${numberOfQuestions} multiple choice questions about: "${topic}"
+Difficulty level: ${difficulty}${focusContext}
+
+Each question should:
+- Test understanding, not just memorization
+- Have 4 options (A, B, C, D)
+- Have a clear correct answer
+- Include a brief explanation of why the answer is correct
+
+Return the quiz as structured JSON.`,
         });
 
         const content = JSON.stringify(object, null, 2);
@@ -428,12 +462,13 @@ export const createQuizMasterAgent = ({
         dataStream.write({
           type: "data-flashcardDelta",
           data: content,
+          transient: true,
         });
 
-        // Signal completion
+        // Signal completion - CRITICAL: always send this
         dataStream.write({ type: "data-finish", data: null });
 
-        // Save to database
+        // Save to database if user is authenticated
         if (session?.user?.id) {
           await saveDocument({
             id: documentId,
@@ -447,16 +482,33 @@ export const createQuizMasterAgent = ({
         return {
           agentName: "quiz-master",
           success: true,
-          summary: `Created a quiz about "${topic}" with ${object.questions.length} questions!`,
-          data: { documentId, topic, questionCount: object.questions.length },
+          summary: `Created an interactive quiz about "${topic}" with ${object.questions.length} questions. The flashcard quiz is now displayed - click through to test your knowledge!`,
+          data: {
+            documentId,
+            topic,
+            numberOfQuestions: object.questions.length,
+            difficulty,
+            focusAreas,
+          },
         };
       } catch (error) {
-        console.error(`[QuizMaster] Error:`, error);
+        console.error("[QuizMaster] Error generating quiz:", error);
+
+        // CRITICAL: Always send finish signal to unblock UI
         dataStream.write({ type: "data-finish", data: null });
+
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown error";
+
         return {
           agentName: "quiz-master",
           success: false,
-          summary: `Failed to create quiz. Please try again.`,
+          summary: `Failed to generate quiz about "${topic}": ${errorMessage}. Please try again.`,
+          data: {
+            documentId,
+            topic,
+            error: errorMessage,
+          },
         };
       }
     },

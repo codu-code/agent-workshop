@@ -186,10 +186,12 @@ ai-chatbot/
 │   │   ├── tools/
 │   │   │   └── get-weather.ts        # Weather tool
 │   │   └── agents/
+│   │       ├── index.ts              # Barrel export for all agents
 │   │       ├── types.ts              # Agent type definitions
-│   │       ├── tutor.ts              # Tutor agent
-│   │       ├── quiz-master.ts        # Quiz Master agent
-│   │       └── planner.ts            # Planner agent
+│   │       ├── tutor.ts              # Tutor agent (text response)
+│   │       ├── quiz-master.ts        # Quiz Master agent (flashcard artifact)
+│   │       ├── planner.ts            # Planner agent (study-plan artifact)
+│   │       └── analyst.ts            # Analyst agent (text response)
 │   ├── db/
 │   │   ├── queries.ts                # Database operations
 │   │   └── types.ts                  # MongoDB types
@@ -225,18 +227,19 @@ ai-chatbot/
 │  │ System Prompt:                                                       ││
 │  │ - You have specialized agents available                              ││
 │  │ - tutor: for explanations                                            ││
-│  │ - quizMaster: for quizzes                                            ││
-│  │ - planner: for study plans                                           ││
+│  │ - quizMaster: for quizzes (creates flashcard artifact)               ││
+│  │ - planner: for study plans (creates study-plan artifact)             ││
+│  │ - analyst: for summarizing and analyzing content                     ││
 │  │ - Match user intent to the right agent                               ││
 │  └─────────────────────────────────────────────────────────────────────┘│
 │                                                                          │
 │  Available Tools:                                                        │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │   tutor      │  │  quizMaster  │  │   planner    │  │  getWeather  │ │
-│  │              │  │              │  │              │  │              │ │
-│  │ Tool wraps   │  │ Tool wraps   │  │ Tool wraps   │  │ Simple tool  │ │
-│  │ agent logic  │  │ agent logic  │  │ agent logic  │  │ (data only)  │ │
-│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘ │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────┐ │
+│  │   tutor    │ │ quizMaster │ │  planner   │ │  analyst   │ │weather │ │
+│  │            │ │            │ │            │ │            │ │        │ │
+│  │ generateText│ │creates    │ │creates     │ │generateText│ │ Simple │ │
+│  │ → text     │ │artifact   │ │artifact    │ │→ text      │ │  tool  │ │
+│  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────┘ │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -259,25 +262,28 @@ Why wrap agents as tools?
 export type CustomUIDataTypes = {
   // Artifact content (each kind has its own delta type)
   textDelta: string;
+  imageDelta: string;
   codeDelta: string;
   sheetDelta: string;
   flashcardDelta: string;   // Quiz questions JSON
   studyPlanDelta: string;   // Study plan JSON
 
+  // Other data types
+  suggestion: Suggestion;    // Document suggestions
+  appendMessage: string;     // Append to message
+
   // Artifact metadata
   id: string;               // Unique document ID
   title: string;            // Display title
-  kind: string;             // Artifact type
+  kind: ArtifactKind;       // Artifact type (typed enum)
 
   // Control signals
   clear: null;              // Clear previous content
   finish: null;             // Signal completion
+  error: string;            // Error signaling from agents
 
   // Analytics
-  usage: {                  // Token usage data
-    promptTokens: number;
-    completionTokens: number;
-  };
+  usage: AppUsage;          // Token usage data (enriched with costs)
 };
 ```
 
@@ -339,12 +345,22 @@ db.documents.createIndex({ userId: 1, createdAt: -1 })
 export const createCodeReviewerAgent = ({ session, dataStream }: CreateAgentProps) =>
   tool({
     description: "Review code for best practices, bugs, and improvements.",
-    parameters: z.object({
-      code: z.string(),
-      language: z.string(),
+    inputSchema: z.object({
+      code: z.string().describe("The code to review"),
+      language: z.string().describe("Programming language of the code"),
+      focusAreas: z
+        .array(z.string())
+        .optional()
+        .describe("Specific areas to focus on (security, performance, etc.)"),
     }),
-    execute: async ({ code, language }) => {
-      // Generate code review...
+    execute: async ({ code, language, focusAreas }): Promise<AgentResult> => {
+      // Generate code review with generateText...
+      return {
+        agentName: "code-reviewer",
+        success: true,
+        summary: reviewText,
+        data: { language, focusAreas },
+      };
     },
   });
 ```
@@ -357,12 +373,21 @@ An agent that can search the web and summarize findings:
 export const createResearcherAgent = ({ session, dataStream }: CreateAgentProps) =>
   tool({
     description: "Research a topic and provide summarized findings.",
-    parameters: z.object({
-      query: z.string(),
-      depth: z.enum(["quick", "thorough"]),
+    inputSchema: z.object({
+      query: z.string().describe("The topic or question to research"),
+      depth: z
+        .enum(["quick", "thorough"])
+        .default("quick")
+        .describe("How deep to research"),
     }),
-    execute: async ({ query, depth }) => {
-      // Fetch from APIs, summarize...
+    execute: async ({ query, depth }): Promise<AgentResult> => {
+      // Fetch from APIs, summarize with generateText...
+      return {
+        agentName: "researcher",
+        success: true,
+        summary: researchFindings,
+        data: { query, depth },
+      };
     },
   });
 ```

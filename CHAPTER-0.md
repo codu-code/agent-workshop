@@ -88,33 +88,53 @@ The heart of the application is `/app/(chat)/api/chat/route.ts`. This is where m
 <summary>📄 <strong>Code: Basic Chat API Route</strong> (click to expand)</summary>
 
 ```typescript
-// app/(chat)/api/chat/route.ts (simplified)
-import { streamText } from "ai";
+// app/(chat)/api/chat/route.ts (core streaming logic)
+import {
+  convertToModelMessages,
+  createUIMessageStream,
+  JsonToSseTransformStream,
+  smoothStream,
+  streamText,
+} from "ai";
+import { type RequestHints, systemPrompt } from "@/lib/ai/prompts";
 import { myProvider } from "@/lib/ai/providers";
-import { systemPrompt } from "@/lib/ai/prompts";
 
-export async function POST(request: Request) {
-  const { messages } = await request.json();
+// Inside POST handler, after authentication and message loading:
+const stream = createUIMessageStream({
+  execute: ({ writer: dataStream }) => {
+    const result = streamText({
+      model: myProvider.languageModel(selectedChatModel),
+      system: systemPrompt({ selectedChatModel, requestHints }),
+      messages: convertToModelMessages(uiMessages),
+      experimental_transform: smoothStream({ chunking: "word" }),
+    });
 
-  // Stream the AI response
-  const result = streamText({
-    model: myProvider.languageModel("chat-model"),
-    system: systemPrompt(),
-    messages,
-  });
+    result.consumeStream();
 
-  return result.toDataStreamResponse();
-}
+    dataStream.merge(
+      result.toUIMessageStream({
+        sendReasoning: true,
+      })
+    );
+  },
+  generateId: generateUUID,
+  onFinish: async ({ messages }) => {
+    // Save messages to database
+  },
+});
+
+return new Response(stream.pipeThrough(new JsonToSseTransformStream()));
 ```
 
 </details>
 
 ### Key Concepts
 
-1. **`streamText`**: The AI SDK function that sends messages to the model and streams the response token by token.
-2. **`myProvider`**: Our configured AI provider (Claude Haiku via AI Gateway).
-3. **`systemPrompt`**: Instructions that tell the AI how to behave.
-4. **`toDataStreamResponse`**: Converts the stream into a format the frontend can consume.
+1. **`createUIMessageStream`**: Creates a stream that handles UI message updates with proper typing.
+2. **`streamText`**: The AI SDK function that sends messages to the model and streams the response.
+3. **`myProvider`**: Our configured AI provider (Claude Haiku via AI Gateway).
+4. **`systemPrompt`**: Function that builds instructions for the AI (takes model and location hints).
+5. **`JsonToSseTransformStream`**: Converts the stream into Server-Sent Events format for the frontend.
 
 ## How Streaming Works
 
@@ -138,31 +158,51 @@ When you send a message:
 
 ## The Frontend Chat Hook
 
-The frontend uses `useChat` from the AI SDK React package:
+The frontend uses `useChat` from the AI SDK React package with a custom transport configuration:
 
 <details>
 <summary>📄 <strong>Code: useChat Hook Usage</strong> (click to expand)</summary>
 
 ```typescript
-// Simplified usage in a chat component
+// components/chat.tsx (key parts)
 import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "@ai-sdk/react/internal";
 
-export function Chat() {
-  const { messages, input, handleSubmit, handleInputChange } = useChat();
+export function Chat({ id, initialMessages, selectedChatModel }) {
+  const {
+    messages,
+    setMessages,
+    sendMessage,
+    status,
+    stop,
+    regenerate,
+    resumeStream,
+  } = useChat<ChatMessage>({
+    id,
+    messages: initialMessages,
+    experimental_throttle: 100,
+    generateId: generateUUID,
+    transport: new DefaultChatTransport({
+      api: "/api/chat",
+      fetch: fetchWithErrorHandlers,
+      prepareSendMessagesRequest(request) {
+        return {
+          ...request,
+          body: {
+            id,
+            message: request.messages[request.messages.length - 1],
+            selectedChatModel,
+            selectedVisibilityType: visibilityType,
+          },
+        };
+      },
+    }),
+    onFinish: () => {
+      mutate("/api/history");
+    },
+  });
 
-  return (
-    <div>
-      {messages.map((message) => (
-        <div key={message.id}>
-          <strong>{message.role}:</strong> {message.content}
-        </div>
-      ))}
-      <form onSubmit={handleSubmit}>
-        <input value={input} onChange={handleInputChange} />
-        <button type="submit">Send</button>
-      </form>
-    </div>
-  );
+  // ... component JSX
 }
 ```
 
@@ -171,10 +211,10 @@ export function Chat() {
 > 💡 **React Parallel**: `useChat` is like combining `useState` for messages, `useReducer` for state transitions, and `useSWR` for the API call - all in one hook.
 
 The `useChat` hook handles:
-- Managing message history
-- Sending messages to the API
-- Streaming response updates
-- Input state management
+- Managing message history with proper typing
+- Sending messages via custom transport
+- Streaming response updates with throttling
+- Request/response transformation
 
 ## Message Format
 
@@ -192,17 +232,43 @@ type Message = {
 
 ## The System Prompt
 
-The system prompt shapes the AI's personality and behavior:
+The system prompt shapes the AI's personality and behavior. It takes the selected model and geolocation hints as parameters:
 
 <details>
 <summary>📄 <strong>Code: System Prompt</strong> (click to expand)</summary>
 
 ```typescript
 // lib/ai/prompts.ts
-export const systemPrompt = () => `
-You are a helpful AI assistant. Be concise and helpful.
-Today's date is ${new Date().toLocaleDateString()}.
+import type { Geo } from "@vercel/functions";
+
+export const regularPrompt =
+  "You are a friendly study buddy assistant! Keep your responses concise and helpful.";
+
+export type RequestHints = {
+  latitude: Geo["latitude"];
+  longitude: Geo["longitude"];
+  city: Geo["city"];
+  country: Geo["country"];
+};
+
+export const getRequestPromptFromHints = (requestHints: RequestHints) => `\
+About the origin of user's request:
+- lat: ${requestHints.latitude}
+- lon: ${requestHints.longitude}
+- city: ${requestHints.city}
+- country: ${requestHints.country}
 `;
+
+export const systemPrompt = ({
+  selectedChatModel,
+  requestHints,
+}: {
+  selectedChatModel: string;
+  requestHints: RequestHints;
+}) => {
+  const requestPrompt = getRequestPromptFromHints(requestHints);
+  return `${regularPrompt}\n\n${requestPrompt}`;
+};
 ```
 
 </details>
