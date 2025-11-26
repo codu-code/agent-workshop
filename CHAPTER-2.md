@@ -53,21 +53,38 @@ First, let's define the structure for our agents:
 ### File: `lib/ai/agents/types.ts`
 
 ```typescript
+import type { UIMessageStreamWriter } from "ai";
 import type { Session } from "next-auth";
-import type { DataStreamWriter } from "ai";
+import type { ChatMessage } from "@/lib/types";
 
-// Props passed to every agent creator
-export type CreateAgentProps = {
-  session: Session | null;
-  dataStream: DataStreamWriter;
+/**
+ * Context passed to all specialized agents
+ * Contains session info, data stream for real-time updates, and chat ID
+ */
+export type AgentContext = {
+  session: Session;
+  dataStream: UIMessageStreamWriter<ChatMessage>;
+  chatId: string;
 };
 
-// Result returned by every agent
+/**
+ * Standard result returned by all agents
+ * Provides consistent interface for orchestrator to handle agent responses
+ */
 export type AgentResult = {
   agentName: string;
   success: boolean;
   summary: string;
   data?: Record<string, unknown>;
+};
+
+/**
+ * Props for creating an agent tool
+ * Same pattern as existing tools (createDocument, requestSuggestions)
+ */
+export type CreateAgentProps = {
+  session: Session;
+  dataStream: UIMessageStreamWriter<ChatMessage>;
 };
 ```
 
@@ -79,28 +96,41 @@ Before building agents, understand what `"chat-model"` means. The app uses named
 |-------------|--------------|---------|
 | `chat-model` | Claude 3.5 Haiku | Main chat with tool calling |
 | `chat-model-reasoning` | Claude 3.5 Haiku | Complex analysis (no tools) |
-| `artifact-model` | GPT-4o Mini | Content generation for artifacts |
-| `title-model` | GPT-4o Mini | Generating chat titles |
+| `artifact-model` | Claude 3.5 Haiku | Content generation for artifacts |
+| `title-model` | Claude 3.5 Haiku | Generating chat titles |
 
-**Why different models?**
-- **Claude Haiku** is fast and great for tool calling (routing to agents)
-- **GPT-4o Mini** is cost-effective for content generation
+**Why use AI Gateway?**
+- Unified API across different model providers
+- Easy switching between models
+- Built-in monitoring and rate limiting
 - You can change these in `lib/ai/providers.ts` to use different models
 
 ```typescript
-// lib/ai/providers.ts (simplified)
+// lib/ai/providers.ts
+import { gateway } from "@ai-sdk/gateway";
+import { customProvider } from "ai";
+
 export const myProvider = customProvider({
   languageModels: {
-    "chat-model": anthropic("claude-3-5-haiku-20241022"),
-    "artifact-model": openai("gpt-4o-mini"),
-    // Add your own model aliases here
+    // Multimodal model - supports images, cheap and fast
+    "chat-model": gateway.languageModel("anthropic/claude-3-5-haiku-latest"),
+    // Reasoning model - using Haiku (no special reasoning tags needed)
+    "chat-model-reasoning": gateway.languageModel(
+      "anthropic/claude-3-5-haiku-latest"
+    ),
+    // Simple/cheap model for titles - using Haiku for consistency
+    "title-model": gateway.languageModel("anthropic/claude-3-5-haiku-latest"),
+    // Simple/cheap model for artifacts - using Haiku for consistency
+    "artifact-model": gateway.languageModel(
+      "anthropic/claude-3-5-haiku-latest"
+    ),
   },
 });
 ```
 
 ## The Tutor Agent
 
-The Tutor agent explains concepts using different teaching approaches:
+The Tutor agent explains concepts with examples and analogies:
 
 ### File: `lib/ai/agents/tutor.ts`
 
@@ -110,88 +140,67 @@ import { z } from "zod";
 import { myProvider } from "../providers";
 import type { AgentResult, CreateAgentProps } from "./types";
 
+const TUTOR_SYSTEM_PROMPT = `You are a patient, encouraging tutor who excels at explaining complex topics.
+
+Your teaching approach:
+- Start with what the student likely already knows
+- Use relatable analogies and real-world examples
+- Break complex ideas into digestible steps
+- Include brief knowledge checks when appropriate
+- Encourage curiosity and questions
+- Adapt explanation depth based on the topic complexity
+
+Structure your explanations with:
+1. A simple overview (1-2 sentences)
+2. The main explanation with examples
+3. Key takeaways or summary points
+
+Keep responses focused and educational. Avoid unnecessary fluff.`;
+
 /**
- * Tutor Agent - Explains concepts with different teaching approaches
+ * Tutor Agent - Explains concepts with examples and analogies
  *
  * Triggers: "explain", "teach me", "how does X work", "what is"
- * Output: Detailed text explanation streamed to chat
+ * Output: Returns explanation text that the orchestrator will present
+ *
+ * Note: We use generateText instead of streaming because tool results
+ * are displayed in the chat UI, not the artifact panel. The orchestrator
+ * (main chat model) can then present the explanation conversationally.
  */
-export const createTutorAgent = ({ session, dataStream }: CreateAgentProps) =>
+export const createTutorAgent = (_props: CreateAgentProps) =>
   tool({
     description:
-      "Explain a concept or topic in depth. Use when the user wants to learn or understand something. " +
-      "Triggers: explain, teach me, how does X work, what is, help me understand.",
+      "Explain a concept, topic, or idea in detail with examples and analogies. Use when the user asks to understand, learn about, or needs explanation of something. Triggers: explain, teach me, how does X work, what is X.",
     inputSchema: z.object({
       topic: z.string().describe("The topic or concept to explain"),
-      approach: z
-        .enum(["eli5", "technical", "analogy", "step-by-step"])
-        .default("step-by-step")
-        .describe(
-          "Teaching approach: eli5 (simple), technical (detailed), analogy (comparisons), step-by-step"
-        ),
-      priorKnowledge: z
+      depth: z
+        .enum(["beginner", "intermediate", "advanced"])
+        .default("intermediate")
+        .describe("The depth of explanation needed based on user context"),
+      context: z
         .string()
         .optional()
-        .describe("What the user already knows about the topic"),
+        .describe(
+          "Additional context about what the user already knows or specific aspects to focus on"
+        ),
     }),
-    execute: async ({
-      topic,
-      approach,
-      priorKnowledge,
-    }): Promise<AgentResult> => {
-      console.log(`[Tutor] Explaining "${topic}" using ${approach} approach`);
+    execute: async ({ topic, depth, context }): Promise<AgentResult> => {
+      const prompt = `Explain "${topic}" at a ${depth} level.${
+        context ? `\n\nAdditional context: ${context}` : ""
+      }`;
 
-      const approachInstructions = {
-        eli5: "Explain like I'm 5 years old. Use simple words, fun comparisons, and relatable examples.",
-        technical:
-          "Give a thorough technical explanation with precise terminology, underlying mechanisms, and edge cases.",
-        analogy:
-          "Explain primarily through analogies and metaphors that connect to everyday experiences.",
-        "step-by-step":
-          "Break down the concept into clear, numbered steps. Start from basics and build up.",
+      const { text } = await generateText({
+        model: myProvider.languageModel("chat-model"),
+        system: TUTOR_SYSTEM_PROMPT,
+        prompt,
+      });
+
+      return {
+        agentName: "tutor",
+        success: true,
+        summary: text,
+        data: { topic, depth, contentLength: text.length },
       };
-
-      const prompt = `You are an expert tutor. Explain the following topic:
-
-**Topic**: ${topic}
-
-**Teaching Approach**: ${approachInstructions[approach]}
-
-${priorKnowledge ? `**User's Prior Knowledge**: ${priorKnowledge}` : ""}
-
-Provide a clear, engaging explanation. Use examples where helpful.
-Format with markdown for readability.`;
-
-      try {
-        const { text } = await generateText({
-          model: myProvider.languageModel("chat-model"),
-          prompt,
-        });
-
-        console.log(`[Tutor] Generated explanation (${text.length} chars)`);
-
-        return {
-          agentName: "tutor",
-          success: true,
-          summary: text,
-          data: {
-            topic,
-            approach,
-            characterCount: text.length,
-          },
-        };
-      } catch (error) {
-        console.error(`[Tutor] Error:`, error);
-        const errorMessage =
-          error instanceof Error ? error.message : "Unknown error";
-
-        return {
-          agentName: "tutor",
-          success: false,
-          summary: `I had trouble explaining "${topic}". Please try again.`,
-          data: { error: errorMessage },
-        };
-      }
     },
   });
 ```
@@ -236,67 +245,96 @@ export const createTutorAgent = ({ session, dataStream }: CreateAgentProps) =>
 ### File: `app/(chat)/api/chat/route.ts`
 
 ```typescript
-import { createDataStreamResponse, streamText } from "ai";
-import { myProvider } from "@/lib/ai/providers";
-import { systemPrompt } from "@/lib/ai/prompts";
-import { getWeather } from "@/lib/ai/tools/get-weather";
-import { createTutorAgent } from "@/lib/ai/agents/tutor";
+import {
+  convertToModelMessages,
+  createUIMessageStream,
+  JsonToSseTransformStream,
+  smoothStream,
+  stepCountIs,
+  streamText,
+} from "ai";
 import { auth } from "@/app/(auth)/auth";
+import { createTutorAgent } from "@/lib/ai/agents";
+import { type RequestHints, systemPrompt } from "@/lib/ai/prompts";
+import { myProvider } from "@/lib/ai/providers";
+import { getWeather } from "@/lib/ai/tools/get-weather";
 
 export async function POST(request: Request) {
-  const session = await auth();
-  const { messages } = await request.json();
+  // ... authentication and request parsing
 
-  return createDataStreamResponse({
-    execute: (dataStream) => {
+  const stream = createUIMessageStream({
+    execute: ({ writer: dataStream }) => {
       const result = streamText({
-        model: myProvider.languageModel("chat-model"),
-        system: systemPrompt(),
-        messages,
+        model: myProvider.languageModel(selectedChatModel),
+        system: systemPrompt({ selectedChatModel, requestHints }),
+        messages: convertToModelMessages(uiMessages),
+        stopWhen: stepCountIs(5),
+        experimental_activeTools:
+          selectedChatModel === "chat-model-reasoning"
+            ? []
+            : ["getWeather", "tutor"],
+        experimental_transform: smoothStream({ chunking: "word" }),
         tools: {
           getWeather,
           // Add the tutor agent as a tool!
           tutor: createTutorAgent({ session, dataStream }),
         },
-        maxSteps: 5,
       });
 
-      result.mergeIntoDataStream(dataStream);
+      result.consumeStream();
+
+      dataStream.merge(
+        result.toUIMessageStream({
+          sendReasoning: true,
+        })
+      );
     },
+    // ... onFinish, onError handlers
   });
+
+  return new Response(stream.pipeThrough(new JsonToSseTransformStream()));
 }
 ```
 
+Note: Agents are imported from the barrel export `@/lib/ai/agents`, not individual files.
+
 ## Updating the System Prompt
 
-Help the orchestrator know when to use the tutor:
+The system prompt helps the orchestrator know when to use each agent. The full prompt is built from multiple parts:
 
 ### File: `lib/ai/prompts.ts`
 
 ```typescript
-export const systemPrompt = () => `
-You are a helpful AI assistant with specialized capabilities.
+export const regularPrompt =
+  "You are a friendly study buddy assistant! Keep your responses concise and helpful.";
 
-## Available Tools
+export const agentRoutingPrompt = `
+You are a Study Buddy with specialized agents available as tools. Choose the right agent based on what the user needs:
 
-### tutor
-Use this when users want to learn or understand something.
-- "explain [topic]"
-- "teach me about [topic]"
-- "how does [thing] work"
-- "what is [concept]"
+**tutor** - Explain concepts with examples and analogies
+Use for: "explain", "teach me", "how does X work", "what is X", understanding concepts
 
-Choose the appropriate teaching approach based on context:
-- eli5: For beginners or when simplicity is requested
-- technical: For advanced users or detailed explanations
-- analogy: When user seems confused or wants relatable examples
-- step-by-step: Default, good for most explanations
-
-### getWeather
-Use for weather queries.
-
-Today's date is ${new Date().toLocaleDateString()}.
+IMPORTANT ROUTING RULES:
+1. Match user intent to the most appropriate agent
+2. If the request doesn't clearly match an agent, respond conversationally
+3. After using an agent, suggest related follow-ups (e.g., after explaining, offer to quiz)
 `;
+
+export const systemPrompt = ({
+  selectedChatModel,
+  requestHints,
+}: {
+  selectedChatModel: string;
+  requestHints: RequestHints;
+}) => {
+  const requestPrompt = getRequestPromptFromHints(requestHints);
+
+  if (selectedChatModel === "chat-model-reasoning") {
+    return `${regularPrompt}\n\n${requestPrompt}`;
+  }
+
+  return `${regularPrompt}\n\n${agentRoutingPrompt}\n\n${requestPrompt}`;
+};
 ```
 
 ## How the Agent Response Flows
@@ -404,5 +442,5 @@ In Chapter 3, we'll add more agents (Quiz Master and Planner) and see how multip
 |------|---------|
 | `lib/ai/agents/types.ts` | New - agent type definitions |
 | `lib/ai/agents/tutor.ts` | New - tutor agent implementation |
-| `app/(chat)/api/chat/route.ts` | Added tutor agent, switched to createDataStreamResponse |
+| `app/(chat)/api/chat/route.ts` | Added tutor agent to tools, added to experimental_activeTools |
 | `lib/ai/prompts.ts` | Added tutor tool documentation |
