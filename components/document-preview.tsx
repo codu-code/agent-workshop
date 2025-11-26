@@ -275,6 +275,22 @@ const DocumentContent = ({ document }: { document: Document }) => {
             <SpreadsheetEditor {...commonProps} />
           </div>
         </div>
+      ) : document.kind === "flashcard" ? (
+        <div className="flex h-full flex-col items-center justify-center p-8 text-center">
+          <div className="mb-2 text-2xl">📝</div>
+          <p className="font-medium text-foreground">Interactive Quiz</p>
+          <p className="mt-1 text-muted-foreground text-sm">
+            Click to start the flashcard quiz
+          </p>
+        </div>
+      ) : document.kind === "study-plan" ? (
+        <div className="flex h-full flex-col items-center justify-center p-8 text-center">
+          <div className="mb-2 text-2xl">📚</div>
+          <p className="font-medium text-foreground">Study Plan</p>
+          <p className="mt-1 text-muted-foreground text-sm">
+            Click to view your personalized study plan
+          </p>
+        </div>
       ) : null}
     </div>
   );
