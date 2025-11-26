@@ -171,6 +171,20 @@ export async function POST(request: Request) {
 
     const stream = createUIMessageStream({
       execute: ({ writer: dataStream }) => {
+        // TODO CHAPTER 1: Add tools to streamText
+        // Import the weather tool:
+        //   import { getWeather } from "@/lib/ai/tools/get-weather";
+        //
+        // Then add these options to streamText below:
+        //   stopWhen: stepCountIs(5),
+        //   experimental_activeTools:
+        //     selectedChatModel === "chat-model-reasoning" ? [] : ["getWeather"],
+        //   tools: {
+        //     getWeather,
+        //   },
+        //
+        // See CHAPTER-1.md for complete implementation details.
+
         const result = streamText({
           model: myProvider.languageModel(selectedChatModel),
           system: systemPrompt({ selectedChatModel, requestHints }),
